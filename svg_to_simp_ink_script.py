@@ -119,6 +119,12 @@ class SvgToPythonScript(inkex.OutputExtension):
     def style_args(self, node, def_svg_style, def_sis_style):
         """Return an SVG node's style string as key=value arguments.  Also
         return additional object dependencies from url(#...) values."""
+        # As a special case, if we're within a <marker> element, force
+        # the default styles to empty.
+        if node.get('sis_within_marker') == 'true':
+            def_svg_style = {'stroke': None,
+                             'fill': None}
+
         # Convert the style string to a dictionary.
         style = node.get('style')
         style_dict = def_svg_style.copy()
@@ -154,7 +160,7 @@ class SvgToPythonScript(inkex.OutputExtension):
         # Replace "url(#...)" values with object references.
         url_ids = set()
         for k, v in style_dict.items():
-            if v[:6] == "'url(#":
+            if v is not None and v[:6] == "'url(#":
                 v = v[6:-2]
                 url_ids.add(v)
                 style_dict[k] = self.Statement.id2var(v)
@@ -181,6 +187,13 @@ class SvgToPythonScript(inkex.OutputExtension):
         deps.update(c_deps)
         deps.update(s_deps)
         return ''.join(args), list(deps)
+
+    def set_within_marker(self, node):
+        '''Recursively mark a node and all its children as lying within an
+        SVG <marker> element.'''
+        node.set('sis_within_marker', 'true')
+        for child in node:
+            self.set_within_marker(child)
 
     def convert_circle(self, node):
         'Return Python code for drawing a circle.'
@@ -664,6 +677,41 @@ class SvgToPythonScript(inkex.OutputExtension):
             code = ['clip_path(%s, clip_units=%s)' % (p_var, repr(c_units))]
         return self.Statement(code, node.get_id(), [p_var])
 
+    def convert_marker(self, node):
+        'Return Python code that defines a marker.'
+        # Mark all of our descendants as lying within a marker.  This
+        # suppresses the use of default styles.
+        for child in node:
+            self.set_within_marker(child)
+
+        # Extract all of the parameters that define the shape.
+        x, y = node.get('refX'), node.get('refY')
+        orient = node.get('orient')
+        m_units = node.get('markerUnits')
+        v_box = node.get('viewBox')
+        extra, extra_deps = self.extra_args(node, {}, {})
+        shape_var = self.Statement.id2var(node[0].get_id())
+
+        # Construct a list of optional arguments.
+        marker_args = []
+        if x is not None or y is not None:
+            marker_args.append('ref=(%s, %s)' % (x or '0', y or '0'))
+        if orient is not None:
+            marker_args.append('orient=%s' % repr(orient))
+        if m_units is not None:
+            marker_args.append('marker_units=%s' % repr(m_units))
+        if v_box is not None:
+            x0, y0, wd, ht = [float(c) for c in v_box.split()]
+            marker_args.append('view_box=((%.5g, %.5g), (%.5g, %.5g))' %
+                               (x0, y0, x0 + wd, y0 + ht))
+
+        # Generate code and wrap it in a statement.
+        m_arg_str = ', '.join(marker_args)
+        if m_arg_str != '':
+            m_arg_str = ', ' + m_arg_str
+        code = ['marker(%s%s%s)' % (shape_var, m_arg_str, extra)]
+        return self.Statement(code, node.get_id(), [shape_var] + extra_deps)
+
     def convert_all_shapes(self):
         'Convert each SVG shape to a Python statement.'
         stmts = []
@@ -681,7 +729,8 @@ class SvgToPythonScript(inkex.OutputExtension):
                                    '//svg:filter | '
                                    '//svg:linearGradient | '
                                    '//svg:radialGradient | '
-                                   '//svg:clipPath'):
+                                   '//svg:clipPath | '
+                                   '//svg:marker'):
             if isinstance(node, inkex.Circle):
                 stmts.append(self.convert_circle(node))
             elif isinstance(node, inkex.Ellipse):
@@ -712,6 +761,8 @@ class SvgToPythonScript(inkex.OutputExtension):
                 stmts.append(self.convert_radial_gradient(node))
             elif isinstance(node, inkex.ClipPath):
                 stmts.append(self.convert_clip_path(node))
+            elif isinstance(node, inkex.Marker):
+                stmts.append(self.convert_marker(node))
             else:
                 inkex.utils.errormsg(_('Internal error converting %s' %
                                        repr(node)))
