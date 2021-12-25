@@ -95,37 +95,6 @@ def _abend(msg):
     sys.exit(1)
 
 
-def diff_attributes(objs):
-    '''Given a list of ShapeElements, return a dictionary mapping an attribute
-    name to a list of values it takes on across all of the ShapeElements.'''
-    # Do nothing if we don't have at least two objects.
-    if len(objs) < 2:
-        return {}  # Too few objects on which to compute differences
-
-    # For each attribute in the first object, produce a list of
-    # corresponding attributes in all other objects.
-    attr2vals = {}
-    for a in objs[0].attrib:
-        if a in ['id', 'style', 'transform']:
-            continue
-        vs = [o.get(a) for o in objs]
-        vs = [v for v in vs if v is not None]
-        if len(set(vs)) == len(objs):
-            attr2vals[a] = vs
-
-    # Handle styles specially.
-    if objs[0].get('style') is not None:
-        style = inkex.Style(objs[0].get('style'))
-        for a in style:
-            vs = []
-            for o in objs:
-                obj_style = inkex.Style(o.get('style'))
-                vs.append(obj_style.get(a))
-            if len(set(vs)) == len(objs):
-                attr2vals[a] = vs
-    return attr2vals
-
-
 class Mpath(inkex.Use):
     'Point to a path object.'
     tag_name = 'mpath'
@@ -356,6 +325,37 @@ class SimpleObject(object):
                 anim.set('fill', 'freeze')
             target._inkscape_obj.append(anim)
 
+    def _diff_attributes(self, objs):
+        '''Given a list of ShapeElements, return a dictionary mapping an
+        attribute name to a list of values it takes on across all of the
+        ShapeElements.'''
+        # Do nothing if we don't have at least two objects.
+        if len(objs) < 2:
+            return {}  # Too few objects on which to compute differences
+
+        # For each attribute in the first object, produce a list of
+        # corresponding attributes in all other objects.
+        attr2vals = {}
+        for a in objs[0].attrib:
+            if a in ['id', 'style', 'transform']:
+                continue
+            vs = [o.get(a) for o in objs]
+            vs = [v for v in vs if v is not None]
+            if len(set(vs)) == len(objs):
+                attr2vals[a] = vs
+
+        # Handle styles specially.
+        if objs[0].get('style') is not None:
+            style = inkex.Style(objs[0].get('style'))
+            for a in style:
+                vs = []
+                for o in objs:
+                    obj_style = inkex.Style(o.get('style'))
+                    vs.append(obj_style.get(a))
+                if len(set(vs)) == len(objs):
+                    attr2vals[a] = vs
+        return attr2vals
+
     def _key_times_string(self, key_times, num_objs, interpolation):
         'Validate key-time values before converting them to a string.'
         # Ensure the argument is the correct type (list of floats) and
@@ -397,7 +397,7 @@ class SimpleObject(object):
             all_iobjs = [self._inkscape_obj] + iobjs
 
         # Identify the differences among all the objects.
-        attr2vals = diff_attributes(all_iobjs)
+        attr2vals = self._diff_attributes(all_iobjs)
         if attr_filter is not None:
             attr2vals = {k: v for k, v in attr2vals.items() if attr_filter(k)}
 
@@ -547,6 +547,15 @@ class SimpleClippingPath(SimpleGroup):
         if clip_units is not None:
             self._inkscape_obj.set('clipPathUnits', clip_units)
         _svg_root.defs.add(self._inkscape_obj)
+
+
+class SimpleHyperlink(SimpleGroup):
+    'Represent a hyperlink.'
+
+    def __init__(self, obj, transform, conn_avoid, clip_path_obj, base_style,
+                 obj_style):
+        super().__init__(obj, transform, conn_avoid, clip_path_obj, base_style,
+                         obj_style, track=True)
 
 
 class SimpleFilter(object):
@@ -1002,6 +1011,29 @@ def layer(name, objs=[], transform=None, conn_avoid=False, clip_path=None,
     return l_obj
 
 
+def hyperlink(objs, href, title=None, target=None, mime_type=None,
+              transform=None, conn_avoid=False, clip_path=None, **style):
+    'Hyperlink one or more objects to a given URI.'
+    anc = inkex.Anchor()
+    anc.set('{http://www.w3.org/1999/xlink}href', href)  # Older SVG
+    anc.set('href', href)                                # Newer SVG
+    if title is not None:
+        # Inkscape uses primarily the older SVG xlink:title attribute.
+        anc.set('{http://www.w3.org/1999/xlink}title', title)
+
+        # Newer SVG files should include a <title> element.
+        t_obj = lxml.etree.Element('title')
+        t_obj.text = title
+        anc.append(t_obj)
+    if target is not None:
+        anc.set('target', target)
+    if mime_type is not None:
+        anc.set('type', mime_type)
+    anc_obj = SimpleHyperlink(anc, transform, conn_avoid, clip_path, {}, style)
+    anc_obj.add(objs)
+    return anc_obj
+
+
 def inkex_object(obj, transform=None, conn_avoid=False, clip_path=None,
                  **style):
     'Expose an arbitrary inkex-created object to Simple Inkscape Scripting.'
@@ -1093,6 +1125,10 @@ class SimpleInkscapeScripting(inkex.GenerateExtension):
         sis_globals['height'] = self.svg.height
         sis_globals['svg_root'] = self.svg
         sis_globals['print'] = _debug_print
+        for unit in ['mm', 'cm', 'pt', 'px']:
+            sis_globals[unit] = inkex.units.convert_unit('1' + unit, 'px')
+        sis_globals['inch'] = \
+            inkex.units.convert_unit('1in', 'px')  # "in" is a keyword.
 
         # Launch the user's script.
         code = ''
