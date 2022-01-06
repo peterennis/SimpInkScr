@@ -1121,19 +1121,31 @@ class SimpleInkscapeScripting(inkex.GenerateExtension):
         global _svg_root
         _svg_root = self.svg
         sis_globals = globals().copy()
-        sis_globals['width'] = self.svg.width
-        sis_globals['height'] = self.svg.height
+        try:
+            # Inkscape 1.2+
+            sis_globals['width'] = self.svg.viewbox_width
+            sis_globals['height'] = self.svg.viewbox_height
+        except AttributeError:
+            # Inkscape 1.0 and 1.1
+            sis_globals['width'] = self.svg.width
+            sis_globals['height'] = self.svg.height
         sis_globals['svg_root'] = self.svg
         sis_globals['print'] = _debug_print
+        try:
+            # Inkscape 1.2+
+            convert_unit = self.svg.viewport_to_unit
+        except AttributeError:
+            # Inkscape 1.0 and 1.1
+            convert_unit = self.svg.unittouu
         for unit in ['mm', 'cm', 'pt', 'px']:
-            sis_globals[unit] = inkex.units.convert_unit('1' + unit, 'px')
+            sis_globals[unit] = convert_unit('1' + unit)
         sis_globals['inch'] = \
-            inkex.units.convert_unit('1in', 'px')  # "in" is a keyword.
+            convert_unit('1in')  # "in" is a keyword.
 
         # Launch the user's script.
         code = ''
         py_source = self.options.py_source
-        if py_source != '' and not os.path.isdir(py_source):
+        if py_source is not None and not os.path.isdir(py_source):
             # The preceding test for isdir is explained in
             # https://gitlab.com/inkscape/inkscape/-/issues/2822
             with open(self.options.py_source) as fd:
