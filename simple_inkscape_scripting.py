@@ -52,15 +52,15 @@ _next_obj_id = 1
 # Store all SimpleObjects the user creates in _simple_objs.
 _simple_objs = []
 
-# Store the user-specified default style in _default_style.
-_default_style = {}
+# Store a stack of user-specified default styles in _default_style.
+_default_style = [{}]
 
 # Most shapes use this as their default style.
 _common_shape_style = {'stroke': 'black',
                        'fill': 'none'}
 
-# Store the default transform in _default_transform.
-_default_transform = None
+# Store a stack of user-specified default transforms in _default_transform.
+_default_transform = [None]
 
 # Store the top-level SVG tree in _svg_root.
 _svg_root = None
@@ -89,6 +89,45 @@ def _split_two_or_one(val):
     return a, b
 
 
+def _python_to_svg_str(val):
+    'Convert a Python value to a string suitable for use in an SVG attribute.'
+    if type(val) == str:
+        # Strings are used unmodified
+        return val
+    if type(val) == bool:
+        # Booleans are converted to lowercase strings.
+        return str(val).lower()
+    if type(val) == float:
+        # Floats are converted using a fair number of significant digits.
+        return '%.10g' % val
+    try:
+        # Each element of a sequence (other than strings, which were
+        # handled above) is converted recursively.
+        return ' '.join([_python_to_svg_str(v) for v in val])
+    except TypeError:
+        pass  # Not a sequence
+    return str(val)  # Everything else is converted to a string as usual.
+
+
+def _svg_str_to_python(str):
+    'Convert an SVG attribute string to an appropriate Python type.'
+    # Recursively convert lists.
+    fields = str.replace(',', ' ').replace(';', ' ').split()
+    if len(fields) > 1:
+        return [_svg_str_to_python(f) for f in fields]
+
+    # Specially handle numerical data types then fall back to strings.
+    try:
+        return int(str)
+    except ValueError:
+        pass
+    try:
+        return float(str)
+    except ValueError:
+        pass
+    return str
+
+
 def _abend(msg):
     'Abnormally end execution with an error message.'
     inkex.utils.errormsg(msg)
@@ -112,8 +151,8 @@ class SimpleObject(object):
             transform = str(transform)   # Transform may be an inkex.Transform.
             if transform != '':
                 ts.append(transform)
-        if _default_transform is not None and _default_transform != '':
-            ts.append(_default_transform)
+        if _default_transform[-1] is not None and _default_transform[-1] != '':
+            ts.append(_default_transform[-1])
         if ts == []:
             self._transform = inkex.Transform()
         else:
@@ -161,7 +200,7 @@ class SimpleObject(object):
         style = base_style.copy()
 
         # Update the style according to the current global default style.
-        style.update(_default_style)
+        style.update(_default_style[-1])
 
         # Update the style based on the object-specific style.
         for k, v in new_style.items():
@@ -169,7 +208,7 @@ class SimpleObject(object):
             if v is None:
                 style[k] = None
             else:
-                style[k] = str(v)
+                style[k] = _python_to_svg_str(v)
 
         # Remove all keys whose value is None.
         style = {k: v for k, v in style.items() if v is not None}
@@ -261,6 +300,21 @@ class SimpleObject(object):
         # Remove the old object and return the new object.
         self.remove()
         return p
+
+    def style(self, **style):
+        """Augment the object's current style and return the new style as a
+        Python dict."""
+        # Merge the old and new styles and apply these to the object.
+        obj = self._inkscape_obj
+        obj.style = self._construct_style(dict(obj.style.items()), style)
+
+        # Convert the style to a dictionary with Python-compatible keys.
+        new_style = {}
+        for k, v in obj.style.items():
+            k = k.replace('-', '_')
+            v = _svg_str_to_python(v)
+            new_style[k] = v
+        return new_style
 
     @property
     def transform(self):
@@ -378,18 +432,20 @@ class SimpleObject(object):
             anim.set('type', xf[0])
             anim.set('values', '; '.join(xf[1]))
             if duration is not None:
-                anim.set('dur', str(duration))
+                anim.set('dur', _python_to_svg_str(duration))
             if begin_time is not None:
-                anim.set('begin', str(begin_time))
+                anim.set('begin', _python_to_svg_str(begin_time))
             if key_times is not None:
                 if len(key_times) != len(iobjs):
                     _abend('Expected %d key times but saw %d' %
                            (len(iobjs), len(key_times)))
-                anim.set('keyTimes', '; '.join([str(kt) for kt in key_times]))
+                anim.set('keyTimes',
+                         '; '.join([_python_to_svg_str(kt)
+                                    for kt in key_times]))
             if repeat_count is not None:
-                anim.set('repeatCount', str(repeat_count))
+                anim.set('repeatCount', _python_to_svg_str(repeat_count))
             if repeat_time is not None:
-                anim.set('repeatDur', str(repeat_time))
+                anim.set('repeatDur', _python_to_svg_str(repeat_time))
             if keep:
                 anim.set('fill', 'freeze')
             target._inkscape_obj.append(anim)
@@ -476,22 +532,22 @@ class SimpleObject(object):
             anim.set('attributeName', a)
             anim.set('values', '; '.join(vs))
             if duration is not None:
-                anim.set('dur', str(duration))
+                anim.set('dur', _python_to_svg_str(duration))
             if begin_time is not None:
-                anim.set('begin', str(begin_time))
+                anim.set('begin', _python_to_svg_str(begin_time))
             if key_times is not None:
                 kt_str = self._key_times_string(key_times,
                                                 len(all_iobjs),
                                                 interpolation)
                 anim.set('keyTimes', kt_str)
             if repeat_count is not None:
-                anim.set('repeatCount', str(repeat_count))
+                anim.set('repeatCount', _python_to_svg_str(repeat_count))
             if repeat_time is not None:
-                anim.set('repeatDur', str(repeat_time))
+                anim.set('repeatDur', _python_to_svg_str(repeat_time))
             if keep:
                 anim.set('fill', 'freeze')
             if interpolation is not None:
-                anim.set('calcMode', str(interpolation))
+                anim.set('calcMode', _python_to_svg_str(interpolation))
             self._inkscape_obj.append(anim)
 
         # Add an <animateMotion> element if a path was supplied.
@@ -499,24 +555,24 @@ class SimpleObject(object):
             # Create an <animateMotion> element.
             animMo = lxml.etree.Element('animateMotion')
             if duration is not None:
-                animMo.set('dur', str(duration))
+                animMo.set('dur', _python_to_svg_str(duration))
             if begin_time is not None:
-                animMo.set('begin', str(begin_time))
+                animMo.set('begin', _python_to_svg_str(begin_time))
             if key_times is not None:
                 kt_str = self._key_times_string(key_times,
                                                 len(all_iobjs),
                                                 interpolation)
                 anim.set('keyTimes', kt_str)
             if repeat_count is not None:
-                animMo.set('repeatCount', str(repeat_count))
+                animMo.set('repeatCount', _python_to_svg_str(repeat_count))
             if repeat_time is not None:
-                animMo.set('repeatDur', str(repeat_time))
+                animMo.set('repeatDur', _python_to_svg_str(repeat_time))
             if keep:
                 animMo.set('fill', 'freeze')
             if interpolation is not None:
-                animMo.set('calcMode', str(interpolation))
+                animMo.set('calcMode', _python_to_svg_str(interpolation))
             if path_rotate is not None:
-                animMo.set('rotate', str(path_rotate))
+                animMo.set('rotate', _python_to_svg_str(path_rotate))
 
             # Insert an <mpath> child under <animateMotion> that links to
             # the given path.
@@ -703,18 +759,8 @@ class SimpleFilter(object):
                     if isinstance(v, self.__class__):
                         v = v.prim.get('result')
                     all_args[s2i[k]] = v
-                elif type(v) == str:
-                    # Strings are used unmodified.
-                    all_args[k] = v
                 else:
-                    try:
-                        # Sequences (other than strings, which are
-                        # sequences of characters) are converted to a
-                        # string of space-separated values.
-                        all_args[k] = ' '.join([str(e) for e in v])
-                    except TypeError:
-                        # Scalars are converted to strings.
-                        all_args[k] = str(v)
+                    all_args[k] = _python_to_svg_str(v)
 
             # Add a primitive to the filter.
             self.prim = filt.add_primitive(ftype, **all_args)
@@ -821,21 +867,23 @@ def style(**kwargs):
     for k, v in kwargs.items():
         k = k.replace('_', '-')
         if v is None:
-            _default_style[k] = None
+            _default_style[-1][k] = None
         else:
-            _default_style[k] = str(v)
+            _default_style[-1][k] = _python_to_svg_str(v)
 
 
 def transform(t):
     'Set the default transform.'
     global _default_transform
-    _default_transform = str(t).strip()
+    _default_transform[-1] = str(t).strip()
 
 
 def circle(center, radius, transform=None, conn_avoid=False, clip_path=None,
            **style):
     'Draw a circle.'
-    obj = inkex.Circle(cx=str(center[0]), cy=str(center[1]), r=str(radius))
+    obj = inkex.Circle(cx=_python_to_svg_str(center[0]),
+                       cy=_python_to_svg_str(center[1]),
+                       r=_python_to_svg_str(radius))
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         _common_shape_style, style)
 
@@ -844,8 +892,10 @@ def ellipse(center, radii, transform=None, conn_avoid=False, clip_path=None,
             **style):
     'Draw an ellipse.'
     rx, ry = _split_two_or_one(radii)
-    obj = inkex.Ellipse(cx=str(center[0]), cy=str(center[1]),
-                        rx=str(rx), ry=str(ry))
+    obj = inkex.Ellipse(cx=_python_to_svg_str(center[0]),
+                        cy=_python_to_svg_str(center[1]),
+                        rx=_python_to_svg_str(rx),
+                        ry=_python_to_svg_str(ry))
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         _common_shape_style, style)
 
@@ -863,8 +913,10 @@ def rect(pt1, pt2, round=None, transform=None, conn_avoid=False,
     ht = y1 - y0
 
     # Draw the rectangle.
-    obj = inkex.Rectangle(x=str(x0), y=str(y0),
-                          width=str(wd), height=str(ht))
+    obj = inkex.Rectangle(x=_python_to_svg_str(x0),
+                          y=_python_to_svg_str(y0),
+                          width=_python_to_svg_str(wd),
+                          height=_python_to_svg_str(ht))
 
     # Optionally round the corners.
     if round is not None:
@@ -872,16 +924,18 @@ def rect(pt1, pt2, round=None, transform=None, conn_avoid=False,
             rx, ry = round
         except TypeError:
             rx, ry = round, round
-        obj.set('rx', str(rx))
-        obj.set('ry', str(ry))
+        obj.set('rx', _python_to_svg_str(rx))
+        obj.set('ry', _python_to_svg_str(ry))
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         _common_shape_style, style)
 
 
 def line(pt1, pt2, transform=None, conn_avoid=False, clip_path=None, **style):
     'Draw a line.'
-    obj = inkex.Line(x1=str(pt1[0]), y1=str(pt1[1]),
-                     x2=str(pt2[0]), y2=str(pt2[1]))
+    obj = inkex.Line(x1=_python_to_svg_str(pt1[0]),
+                     y1=_python_to_svg_str(pt1[1]),
+                     x2=_python_to_svg_str(pt2[0]),
+                     y2=_python_to_svg_str(pt2[1]))
     base_style = {'stroke': 'black'}  # No need for fill='none' here.
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         base_style, style)
@@ -892,7 +946,8 @@ def polyline(coords, transform=None, conn_avoid=False, clip_path=None,
     'Draw a polyline.'
     if len(coords) < 2:
         _abend(_('A polyline must contain at least two points.'))
-    pts = ' '.join(["%s,%s" % (str(x), str(y)) for x, y in coords])
+    pts = ' '.join(["%s,%s" % (_python_to_svg_str(x), _python_to_svg_str(y))
+                    for x, y in coords])
     obj = inkex.Polyline(points=pts)
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         _common_shape_style, style)
@@ -902,7 +957,8 @@ def polygon(coords, transform=None, conn_avoid=False, clip_path=None, **style):
     'Draw a polygon.'
     if len(coords) < 3:
         _abend(_('A polygon must contain at least three points.'))
-    pts = ' '.join(["%s,%s" % (str(x), str(y)) for x, y in coords])
+    pts = ' '.join(["%s,%s" % (_python_to_svg_str(x), _python_to_svg_str(y))
+                    for x, y in coords])
     obj = inkex.Polygon(points=pts)
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         _common_shape_style, style)
@@ -1004,7 +1060,7 @@ def path(elts, transform=None, conn_avoid=False, clip_path=None, **style):
         elts = re.split(r'[\s,]+', elts)
     if len(elts) == 0:
         _abend(_('A path must contain at least one path element.'))
-    d = ' '.join([str(e) for e in elts])
+    d = ' '.join([_python_to_svg_str(e) for e in elts])
     obj = inkex.PathElement(d=d)
     return SimpleObject(obj, transform, conn_avoid, clip_path,
                         _common_shape_style, style)
@@ -1020,8 +1076,8 @@ def connector(obj1, obj2, ctype='polyline', curve=0,
     path = inkex.PathElement(d=d)
 
     # Mark the path as a connector.
-    path.set('inkscape:connector-type', str(ctype))
-    path.set('inkscape:connector-curvature', str(curve))
+    path.set('inkscape:connector-type', _python_to_svg_str(ctype))
+    path.set('inkscape:connector-curvature', _python_to_svg_str(curve))
     path.set('inkscape:connection-start', '#%s' % obj1._inkscape_obj.get_id())
     path.set('inkscape:connection-end', '#%s' % obj2._inkscape_obj.get_id())
 
@@ -1034,7 +1090,8 @@ def text(msg, base, path=None, transform=None, conn_avoid=False,
          clip_path=None, **style):
     'Typeset a piece of text, optionally along a path.'
     # Create the basic text object.
-    obj = inkex.TextElement(x=str(base[0]), y=str(base[1]))
+    obj = inkex.TextElement(x=_python_to_svg_str(base[0]),
+                            y=_python_to_svg_str(base[1]))
     obj.set('xml:space', 'preserve')
     obj.text = msg
 
@@ -1058,8 +1115,8 @@ def more_text(msg, base=None, conn_avoid=False, **style):
     tspan.text = msg
     tspan.style = obj._construct_style({}, style)
     if base is not None:
-        tspan.set('x', str(base[0]))
-        tspan.set('y', str(base[1]))
+        tspan.set('x', _python_to_svg_str(base[0]))
+        tspan.set('y', _python_to_svg_str(base[1]))
     obj._inkscape_obj.append(tspan)
     return obj
 
@@ -1098,7 +1155,8 @@ def duplicate(obj, transform=None, conn_avoid=False, clip_path=None, **style):
     'Return a duplicate of the object.'
     cpy = obj._inkscape_obj.copy()
     old_style = dict(cpy.style.items())
-    return SimpleObject(cpy, transform, conn_avoid, clip_path, old_style, style)
+    return SimpleObject(cpy, transform, conn_avoid, clip_path,
+                        old_style, style)
 
 
 def group(objs=[], transform=None, conn_avoid=False, clip_path=None,
@@ -1190,9 +1248,9 @@ def marker(obj, ref=None, orient='auto', marker_units=None,
     obj.remove()
     m = inkex.Marker(obj._inkscape_obj.copy())  # Copy so we can reuse obj.
     if ref is not None:
-        m.set('refX', str(ref[0]))
-        m.set('refY', str(ref[1]))
-    m.set('orient', str(orient))
+        m.set('refX', _python_to_svg_str(ref[0]))
+        m.set('refY', _python_to_svg_str(ref[1]))
+    m.set('orient', _python_to_svg_str(orient))
     if marker_units is not None:
         m.set('markerUnits', marker_units)
     if view_box == 'auto':
@@ -1205,6 +1263,22 @@ def marker(obj, ref=None, orient='auto', marker_units=None,
         x1, y1 = lr
         m.set('viewBox', '%.5g %.5g %.5g %.5g' % (x0, y0, x1 - x0, y1 - y0))
     return SimpleMarker(m, **style).to_def()
+
+
+def push_defaults():
+    'Duplicate the top element of the default style and transform stacks.'
+    global _default_style, _default_transform
+    _default_style.append({k: v for k, v in _default_style[-1].items()})
+    _default_transform.append(_default_transform[-1])
+
+
+def pop_defaults():
+    'Discard the top element of the default style and transform stacks.'
+    global _default_style, _default_transform
+    _default_style.pop()
+    _default_transform.pop()
+    if len(_default_style) == 0 or len(_default_transform) == 0:
+        raise IndexError('more defaults popped than pushed')
 
 
 # ----------------------------------------------------------------------
