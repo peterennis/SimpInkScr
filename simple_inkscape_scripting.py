@@ -17,10 +17,10 @@ You should have received a copy of the GNU General Public License
 along with this program; if not, write to the Free Software
 Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 02110-1301, USA.
-
 '''
 
 import inkex
+from inkex.localization import inkex_gettext as _
 import PIL.Image
 import base64
 import io
@@ -49,8 +49,8 @@ _id_prefix = 'simp-ink-scr-%d-' % randint(100000, 999999)
 # Keep track of the next ID to append to _id_prefix.
 _next_obj_id = 1
 
-# Store all SimpleObjects the user creates in _simple_objs.
-_simple_objs = []
+# Maintain all top-level SVG state in _simple_top.
+_simple_top = None
 
 # Store a stack of user-specified default styles in _default_style.
 _default_style = [{}]
@@ -62,21 +62,10 @@ _common_shape_style = {'stroke': 'black',
 # Store a stack of user-specified default transforms in _default_transform.
 _default_transform = [None]
 
-# Store the top-level SVG tree in _svg_root.
-_svg_root = None
-
 
 def _debug_print(*args):
     'Implement print in terms of inkex.utils.debug.'
     inkex.utils.debug(' '.join([str(a) for a in args]))
-
-
-def _unique_id():
-    'Return a unique ID.'
-    global _id_prefix, _next_obj_id
-    tag = '%s%d' % (_id_prefix, _next_obj_id)
-    _next_obj_id += 1
-    return tag
 
 
 def _split_two_or_one(val):
@@ -130,13 +119,100 @@ def _svg_str_to_python(str):
 
 def _abend(msg):
     'Abnormally end execution with an error message.'
-    inkex.utils.errormsg(msg)
-    sys.exit(1)
+    raise inkex.AbortExtension(msg)
 
 
 class Mpath(inkex.Use):
     'Point to a path object.'
     tag_name = 'mpath'
+
+
+class SimpleTopLevel(object):
+    "Keep track of top-level objects, both ours and inkex's."
+
+    def __init__(self, svg_root):
+        self._svg_root = svg_root
+        self._svg_attach = self.find_attach_point()
+        self._simple_objs = []
+
+    def find_attach_point(self):
+        '''Return a suitable point in the SVG XML tree at which to attach
+        new objects.'''
+        # The Inkscape GUI automatically adds a <sodipodi:namedview> element
+        # with an inkscape:current-layer attribute, and this will name either
+        # an actual layer or the <svg> element itself.  In this case, we return
+        # the layer pointed to by inkscape:current-layer.
+        svg = self._svg_root
+        try:
+            namedview = svg.findone('sodipodi:namedview')
+            cur_layer_name = namedview.get('inkscape:current-layer')
+            cur_layer = svg.xpath('//*[@id="%s"]' % cur_layer_name)[0]
+            return cur_layer
+        except AttributeError:
+            pass
+
+        # If an extension is run from the command line, the input SVG file may
+        # lack a <sodipodi:namedview> element.  (This is the case for
+        # /usr/share/inkscape/templates/default.svg in my installation, for
+        # example.)  In this case, we return the topmost layer.
+        try:
+            return svg.xpath('//svg:g[@inkscape:groupmode="layer"]')[-1]
+        except IndexError:
+            pass
+
+        # A very minimal SVG input may contain no layers at all.  In this case,
+        # we return the top-level <svg> element.
+        return svg
+
+    def append_obj(self, obj, to_root=False):
+        'Append a Simple Inkscape Scripting object to the document.'
+        # Check for a few error conditions.
+        if not isinstance(obj, SimpleObject):
+            raise ValueError('Only Simple Inkscape Scripting objects '
+                             'can be appended')
+        if obj in self._simple_objs:
+            raise ValueError('Object has already been appended')
+
+        # Attach the underlying inkex object to the SVG attachment point if
+        # to_root is False or to the SVG root if to_root is True.  Append
+        # the Simple Inkscape Scripting object to the list of simple
+        # objects.
+        if to_root:
+            self._svg_root.append(obj._inkscape_obj)
+        else:
+            self._svg_attach.append(obj._inkscape_obj)
+        self._simple_objs.append(obj)
+
+    def remove_obj(self, obj):
+        'Remove a Simple Inkscape Scripting object from the document.'
+        # Check for a few error conditions.
+        if not isinstance(obj, SimpleObject):
+            raise ValueError('Only Simple Inkscape Scripting objects '
+                             'can be removed')
+        if obj not in self._simple_objs:
+            raise ValueError('Object does not appear at the top level')
+
+        # Elide the Simple Inkscape Scripting object and dissociate the
+        # underlying inkex object from its parent.
+        self._simple_objs = [o for o in self._simple_objs if o is not obj]
+        obj._inkscape_obj.delete()
+
+    def last_obj(self):
+        'Return the last Simple Inkscape Scripting object added by append_obj.'
+        return self._simple_objs[-1]
+
+    def append_def(self, obj):
+        '''Append either an inkex object or a Simple Inkscape Scripting object
+        to the document's <defs> section.'''
+        try:
+            self._svg_root.defs.append(obj._inkscape_obj)
+        except AttributeError:
+            self._svg_root.defs.append(obj)
+
+    def __contains__(self, obj):
+        '''Return True if a given Simple Inkscape Scripting object appears at
+        the document's top level.'''
+        return obj in self._simple_objs
 
 
 class SimpleObject(object):
@@ -178,13 +254,10 @@ class SimpleObject(object):
         if ext_style != '':
             obj.style = ext_style
 
-        # Assign the object a unique ID.
-        obj.set_id(_unique_id())
-
         # Store the modified Inkscape object.
         self._inkscape_obj = obj
         if track:
-            _simple_objs.append(self)
+            _simple_top.append_obj(self)
         self.parent = None
 
     def __str__(self):
@@ -227,19 +300,20 @@ class SimpleObject(object):
 
     def remove(self):
         'Remove the current object from the list of rendered objects.'
-        global _simple_objs
         try:
             self.parent.ungroup(self)
         except AttributeError:
             pass  # Not within a group
-        _simple_objs = [o for o in _simple_objs if o is not self]
+        global _simple_top
+        if self in _simple_top:
+            _simple_top.remove_obj(self)
 
     def to_def(self):
         '''Convert the object to a definition, removing it from the list of
         rendered objects.'''
-        global _svg_root
         self.remove()
-        _svg_root.defs.add(self._inkscape_obj)
+        global _simple_top
+        _simple_top.append_def(self)
         return self
 
     def _path_to_curve(self, pe):
@@ -631,6 +705,7 @@ class SimpleGroup(SimpleObject):
     def add(self, objs):
         'Add one or more SimpleObjects to the group.'
         # Ensure the addition is legitimate.
+        global _simple_top
         if type(objs) != list:
             objs = [objs]   # Convert scalar to list
         for obj in objs:
@@ -640,7 +715,7 @@ class SimpleGroup(SimpleObject):
                          'objects can be added to a group.'))
             if isinstance(obj, SimpleLayer):
                 _abend(_('Layers cannot be added to groups.'))
-            if obj not in _simple_objs:
+            if obj not in _simple_top:
                 _abend(_('Only objects not already in a group '
                          'or layer can be added to a group.'))
 
@@ -656,23 +731,23 @@ class SimpleGroup(SimpleObject):
         '''Remove one or more objects from the group and add it to the
         top level.'''
         # Add each object to the top level.
-        global _simple_objs
         if objs is None:
             objs = self._children
         elif type(objs) != list:
             objs = [objs]   # Convert scalar to list
+        global _simple_top
         for o in objs:
             if o.parent != self:
                 abend(_('Attempt to remove an object from a group to which '
                         'it does not belong.'))
             o.parent = None
-            _simple_objs.append(o)
+            _simple_top.append_obj(o)
 
-        # Remove each object from the SimpleGroup and the SVG group.
+        # Remove each object from the SimpleGroup.  It has already been
+        # removed from the SVG group as a side effect of the call to
+        # append_obj above.
         objs = set(objs)
         self._children = [ch for ch in self._children if ch not in objs]
-        for o in objs:
-            self._inkscape_obj.remove(o._inkscape_obj)
 
         # If the group is empty, remove it entirely.
         if self._children == []:
@@ -687,8 +762,8 @@ class SimpleLayer(SimpleGroup):
         super().__init__(obj, transform, conn_avoid, clip_path_obj, base_style,
                          obj_style, track=False)
         self._children = []
-        global _svg_root
-        _svg_root.add(self._inkscape_obj)
+        global _simple_top
+        _simple_top.append_obj(self, to_root=True)
 
 
 class SimpleClippingPath(SimpleGroup):
@@ -701,7 +776,8 @@ class SimpleClippingPath(SimpleGroup):
         self._children = []
         if clip_units is not None:
             self._inkscape_obj.set('clipPathUnits', clip_units)
-        _svg_root.defs.add(self._inkscape_obj)
+        global _simple_top
+        _simple_top.append_def(self)
 
 
 class SimpleHyperlink(SimpleGroup):
@@ -716,9 +792,11 @@ class SimpleHyperlink(SimpleGroup):
 class SimpleFilter(object):
     'Represent an SVG filter effect.'
 
-    def __init__(self, defs, name=None, pt1=None, pt2=None,
+    def __init__(self, name=None, pt1=None, pt2=None,
                  filter_units=None, primitive_units=None, **style):
-        self.filt = defs.add(inkex.Filter())
+        self.filt = inkex.Filter()
+        global _simple_top
+        _simple_top.append_def(self.filt)
         if name is not None and name != '':
             self.filt.set('inkscape:label', name)
         if pt1 is not None or pt2 is not None:
@@ -737,6 +815,7 @@ class SimpleFilter(object):
         style_str = str(inkex.Style(**style))
         if style_str != '':
             self.filt.set('style', style_str)
+        self._prim_tally = {}
 
     def __str__(self):
         return 'url(#%s)' % self.filt.get_id()
@@ -744,9 +823,14 @@ class SimpleFilter(object):
     class SimpleFilterPrimitive(object):
         'Represent one component of an SVG filter effect.'
 
-        def __init__(self, filt, ftype, **kw_args):
-            # Assign a random ID for the default result.
-            all_args = {'result': _unique_id()}
+        def __init__(self, simp_filt, ftype, **kw_args):
+            # Assign a default name to the result.
+            try:
+                res_num = simp_filt._prim_tally[ftype] + 1
+            except KeyError:
+                res_num = 1
+            simp_filt._prim_tally[ftype] = res_num
+            all_args = {'result': '%s%d' % (ftype[2:].lower(), res_num)}
 
             # Make "src1" and "src2" smart aliases for "in" and "in2".
             s2i = {'src1': 'in', 'src2': 'in2'}
@@ -762,12 +846,12 @@ class SimpleFilter(object):
                 else:
                     all_args[k] = _python_to_svg_str(v)
 
-            # Add a primitive to the filter.
-            self.prim = filt.add_primitive(ftype, **all_args)
+            # Add a primitive to the inkex filter.
+            self.prim = simp_filt.filt.add_primitive(ftype, **all_args)
 
     def add(self, ftype, **kw_args):
         'Add a primitive to a filter and return an object representation.'
-        return self.SimpleFilterPrimitive(self.filt, 'fe' + ftype, **kw_args)
+        return self.SimpleFilterPrimitive(self, 'fe' + ftype, **kw_args)
 
 
 class SimpleGradient(object):
@@ -819,7 +903,7 @@ class SimpleGradient(object):
 class SimpleLinearGradient(SimpleGradient):
     'Represent an SVG linear gradient pattern.'
 
-    def __init__(self, defs, pt1=None, pt2=None, repeat=None,
+    def __init__(self, pt1=None, pt2=None, repeat=None,
                  gradient_units=None, template=None, transform=None,
                  **style):
         grad = inkex.LinearGradient()
@@ -831,15 +915,18 @@ class SimpleLinearGradient(SimpleGradient):
             grad.set('y2', pt2[1])
         self._set_common(grad, repeat, gradient_units, template,
                          transform, **style)
-        self.grad = defs.add(grad)
+        global _simple_top
+        _simple_top.append_def(grad)
+        self.grad = grad
 
 
 class SimpleRadialGradient(SimpleGradient):
     'Represent an SVG radial gradient pattern.'
 
-    def __init__(self, defs, center=None, radius=None, focus=None, fr=None,
+    def __init__(self, center=None, radius=None, focus=None, fr=None,
                  repeat=None, gradient_units=None, template=None,
                  transform=None, **style):
+        global _svg_defs
         grad = inkex.RadialGradient()
         if center is not None:
             grad.set('cx', center[0])
@@ -853,7 +940,9 @@ class SimpleRadialGradient(SimpleGradient):
             grad.set('fr', fr)
         self._set_common(grad, repeat, gradient_units, template,
                          transform, **style)
-        self.grad = defs.add(grad)
+        global _simple_top
+        _simple_top.append_def(grad)
+        self.grad = grad
 
 
 # ----------------------------------------------------------------------
@@ -1106,11 +1195,15 @@ def text(msg, base, path=None, transform=None, conn_avoid=False,
 
 def more_text(msg, base=None, conn_avoid=False, **style):
     'Append text to the preceding object, which must be text.'
-    if len(_simple_objs) == 0 or \
-       not isinstance(_simple_objs[-1]._inkscape_obj, inkex.TextElement):
+    global _simple_top
+    try:
+        obj = _simple_top.last_obj()
+    except IndexError:
         _abend(_('more_text must immediately follow'
                  ' text or another more_text'))
-    obj = _simple_objs[-1]
+    if not isinstance(obj._inkscape_obj, inkex.TextElement):
+        _abend(_('more_text must immediately follow'
+                 ' text or another more_text'))
     tspan = inkex.Tspan()
     tspan.text = msg
     tspan.style = obj._construct_style({}, style)
@@ -1213,14 +1306,14 @@ def inkex_object(obj, transform=None, conn_avoid=False, clip_path=None,
 def filter_effect(name=None, pt1=None, pt2=None,
                   filter_units=None, primitive_units=None, **style):
     'Return an object representing an empty filter effect.'
-    return SimpleFilter(_svg_root.defs, name, pt1, pt2,
+    return SimpleFilter(name, pt1, pt2,
                         filter_units, primitive_units, **style)
 
 
 def linear_gradient(pt1=None, pt2=None, repeat=None, gradient_units=None,
                     template=None, transform=None, **style):
     'Return an object representing a linear gradient.'
-    return SimpleLinearGradient(_svg_root.defs, pt1, pt2, repeat,
+    return SimpleLinearGradient(pt1, pt2, repeat,
                                 gradient_units, template, transform,
                                 **style)
 
@@ -1229,7 +1322,7 @@ def radial_gradient(center=None, radius=None, focus=None, fr=None,
                     repeat=None, gradient_units=None, template=None,
                     transform=None, **style):
     'Return an object representing a radial gradient.'
-    return SimpleRadialGradient(_svg_root.defs, center, radius, focus, fr,
+    return SimpleRadialGradient(center, radius, focus, fr,
                                 repeat, gradient_units, template,
                                 transform, **style)
 
@@ -1283,7 +1376,7 @@ def pop_defaults():
 
 # ----------------------------------------------------------------------
 
-class SimpleInkscapeScripting(inkex.GenerateExtension):
+class SimpleInkscapeScripting(inkex.EffectExtension):
     'Help the user create Inkscape objects with a simple API.'
 
     def add_arguments(self, pars):
@@ -1295,16 +1388,41 @@ class SimpleInkscapeScripting(inkex.GenerateExtension):
         pars.add_argument('--py-source', type=str,
                           help='Python source file to execute')
 
-    def container_transform(self):
-        '''Return an empty tranform so as to preserve user-specified
-        coordinates.'''
-        return inkex.Transform()
+    def find_attach_point(self):
+        '''Return a suitable point in the SVG XML tree at which to attach
+        new objects.'''
+        # The Inkscape GUI automatically adds a <sodipodi:namedview> element
+        # with an inkscape:current-layer attribute, and this will name either
+        # an actual layer or the <svg> element itself.  In this case, we return
+        # the layer pointed to by inkscape:current-layer.
+        try:
+            namedview = self.svg.findone('sodipodi:namedview')
+            cur_layer_name = namedview.get('inkscape:current-layer')
+            cur_layer = self.svg.xpath('//*[@id="%s"]' % cur_layer_name)[0]
+            return cur_layer
+        except AttributeError:
+            pass
 
-    def generate(self):
+        # If an extension is run from the command line, the input SVG file may
+        # lack a <sodipodi:namedview> element.  (This is the case for
+        # /usr/share/inkscape/templates/default.svg in my installation, for
+        # example.)  In this case, we return the topmost layer.
+        try:
+            return self.svg.xpath('//svg:g[@inkscape:groupmode="layer"]')[-1]
+        except IndexError:
+            pass
+
+        # A very minimal SVG input may contain no layers at all.  In this case,
+        # we return the top-level <svg> element.
+        return self.svg
+
+    def effect(self):
         'Generate objects from user-provided Python code.'
+        # Prepare global values we use internally.
+        global _simple_top
+        _simple_top = SimpleTopLevel(self.svg)
+
         # Prepare global values we want to export.
-        global _svg_root
-        _svg_root = self.svg
         sis_globals = globals().copy()
         try:
             # Inkscape 1.2+
@@ -1327,6 +1445,9 @@ class SimpleInkscapeScripting(inkex.GenerateExtension):
         sis_globals['inch'] = \
             convert_unit('1in')  # "in" is a keyword.
 
+        # Determine where in the SVG hierarchy new objects should be attached.
+        attach_point = self.find_attach_point()
+
         # Launch the user's script.
         code = ''
         py_source = self.options.py_source
@@ -1339,11 +1460,6 @@ class SimpleInkscapeScripting(inkex.GenerateExtension):
         if self.options.program is not None:
             code += self.options.program.replace(r'\n', '\n')
         exec(code, sis_globals)
-
-        # Yield all objects created to the Inkscape core.
-        for obj in _simple_objs:
-            obj._apply_transform()
-            yield obj._inkscape_obj
 
 
 if __name__ == '__main__':
