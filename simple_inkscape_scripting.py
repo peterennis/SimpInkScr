@@ -323,16 +323,18 @@ class SimpleObject(object):
         csp = pe.path.to_superpath()
         prev = inkex.Vector2d()
         prev_prev = inkex.Vector2d()
-        pes = list(csp.to_segments(curves_only=True))
+        segs = list(csp.to_segments())
+        new_segs = []
 
         # Postprocess all linear curves to make them more suitable for
         # conversion to B-splines.
         prev = inkex.Vector2d()
         prev_prev = inkex.Vector2d()
-        for i, seg in enumerate(pes):
-            if i == 0:
+        for i, seg in enumerate(segs):
+            if isinstance(seg, inkex.paths.Move):
                 first = seg.end_point(inkex.Vector2d(), prev)
-            if isinstance(seg, inkex.paths.Curve):
+                new_segs.append(seg)
+            elif isinstance(seg, inkex.paths.Curve):
                 # Convert [a, a, b, b] to [a, 1/3[a, b], 2/3[a, b], b].
                 pt1 = prev
                 pt2 = inkex.Vector2d(seg.x2, seg.y2)
@@ -341,12 +343,36 @@ class SimpleObject(object):
                 if pt1.is_close(pt2) and pt3.is_close(pt4):
                     pt2 = (2*pt1 + pt4)/3
                     pt3 = (pt1 + 2*pt4)/3
-                    pes[i] = inkex.paths.Curve(pt2.x, pt2.y,
-                                               pt3.x, pt3.y,
-                                               pt4.x, pt4.y)
+                    new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
+                                                      pt3.x, pt3.y,
+                                                      pt4.x, pt4.y))
+            elif isinstance(seg, inkex.paths.Line):
+                # Convert the line [a, b] to the curve [a, 1/3[a, b],
+                # 2/3[a, b], b].
+                pt1 = prev
+                pt4 = inkex.Vector2d(seg.x, seg.y)
+                pt2 = (2*pt1 + pt4)/3
+                pt3 = (pt1 + 2*pt4)/3
+                new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
+                                                  pt3.x, pt3.y,
+                                                  pt4.x, pt4.y))
+            elif isinstance(seg, inkex.paths.ZoneClose):
+                # Draw a line back to the first point.
+                pt1 = prev
+                pt4 = first
+                if not pt1.is_close(pt4):
+                    pt2 = (2*pt1 + pt4)/3
+                    pt3 = (pt1 + 2*pt4)/3
+                    new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
+                                                      pt3.x, pt3.y,
+                                                      pt4.x, pt4.y))
+                new_segs.append(seg)
+            else:
+                abend(_('internal error: unexpected path command '
+                        'in _path_to_curve'))
             prev_prev = prev
             prev = seg.end_point(first, prev)
-        return pes
+        return new_segs
 
     def to_path(self, all_curves=False):
         '''Convert the object to a path, removing it from the list of
@@ -675,6 +701,36 @@ class SimpleObject(object):
         return self._inkscape_obj
 
 
+class SimplePathObject(SimpleObject):
+    'A SimplePathObject is a SimpleObject to which LPEs can be applied.'
+
+    def apply_path_effect(self, lpe):
+        'Apply one or more path effects to the path.'
+        # Convert a scalar to a singleton list for consistent access.
+        if isinstance(lpe, list):
+            lpe_list = lpe
+        else:
+            lpe_list = [lpe]
+
+        # Rename the d attribute to inkscape:original-d to notify Inkscape
+        # to compute the modified d.
+        obj = self._inkscape_obj
+        d = obj.get('d')
+        if d is not None:
+            obj.set('inkscape:original-d', d)
+            obj.set('d', None)
+
+        # Apply each LPE in turn.
+        for lpe in lpe_list:
+            # If this is our first LPE, apply it.  Otherwise, append it to the
+            # previous LPE.
+            pe_list = obj.get('inkscape:path-effect')
+            if pe_list is None:
+                obj.set('inkscape:path-effect', str(lpe))
+            else:
+                obj.set('inkscape:path-effect', '%s;%s' % (pe_list, str(lpe)))
+
+
 class SimpleMarker(SimpleObject):
     'Represent a path marker, which wraps an arbitrary object.'
 
@@ -945,6 +1001,24 @@ class SimpleRadialGradient(SimpleGradient):
         self.grad = grad
 
 
+class SimplePathEffect(object):
+    'Represent an Inkscape live path effect.'
+
+    def __init__(self, effect, **kwargs):
+        smart_args = {k: _python_to_svg_str(v)
+                      for k, v in kwargs.items()
+                      if k != 'id'}
+        pe = inkex.PathEffect(effect=effect, **smart_args)
+        self._inkscape_obj = pe
+        global _simple_top
+        _simple_top.append_def(pe)
+
+    def __str__(self):
+        '''Return a path effect as a "#" and its ID.  This enables directly
+        associating the path effect with a path.'''
+        return '#%s' % self._inkscape_obj.get_id()
+
+
 # ----------------------------------------------------------------------
 
 # The following functions represent the Simple Inkscape Scripting API
@@ -1151,8 +1225,8 @@ def path(elts, transform=None, conn_avoid=False, clip_path=None, **style):
         _abend(_('A path must contain at least one path element.'))
     d = ' '.join([_python_to_svg_str(e) for e in elts])
     obj = inkex.PathElement(d=d)
-    return SimpleObject(obj, transform, conn_avoid, clip_path,
-                        _common_shape_style, style)
+    return SimplePathObject(obj, transform, conn_avoid, clip_path,
+                            _common_shape_style, style)
 
 
 def connector(obj1, obj2, ctype='polyline', curve=0,
@@ -1372,6 +1446,11 @@ def pop_defaults():
     _default_transform.pop()
     if len(_default_style) == 0 or len(_default_transform) == 0:
         raise IndexError('more defaults popped than pushed')
+
+
+def path_effect(effect, **kwargs):
+    'Return an object represent a live path effect.'
+    return SimplePathEffect(effect, **kwargs)
 
 
 # ----------------------------------------------------------------------
