@@ -503,21 +503,34 @@ class SvgToPythonScript(inkex.OutputExtension):
 
             def __init__(self, pnode, var2prim):
                 self.prim = pnode
-                self.var_name = pnode.get('result')
-                if self.var_name is not None:
-                    self.var_name = id2var(self.var_name)
+                self.var_name = id2var(pnode.get('result') or pnode.get_id())
                 self.src1 = pnode.get('in')
                 self.src2 = pnode.get('in2')
                 self.var2prim = var2prim
                 self.need_var_name = False
 
+            def _attrib2py(self, key, val):
+                "Convert an attribute's key and value to a Python tuple."
+                key_str = key.replace('-', '_')
+                val_list = []
+                for v in val.split():
+                    try:
+                        # If the value is convertible to a float, append it
+                        # verbatim.
+                        vf = float(v)
+                        val_list.append(v)
+                    except ValueError:
+                        # If the value is not convertible to a float, quote it
+                        # as a string and append it.
+                        val_list.append(repr(v))
+                val_str = ', '.join(val_list)
+                if len(val_list) > 1:
+                    val_str = '[%s]' % val_str
+                return key_str, val_str
+
             def __str__(self):
                 # Invoke the add method on the filter_effect object.
-                if self.need_var_name:
-                    code = '%s = ' % self.var_name
-                else:
-                    code = ''
-                code += '%s.add(%s' % (filt_name, repr(self.prim.tag_name[2:]))
+                code = '%s.add(%s' % (filt_name, repr(self.prim.tag_name[2:]))
 
                 # Specially handle src1 and src2.  These point to
                 # either a named filter primitive or a string.
@@ -535,14 +548,27 @@ class SvgToPythonScript(inkex.OutputExtension):
                 # Append all remaining attributes.
                 for k, v in self.prim.items():
                     if k not in ['in', 'in2', 'result', 'id']:
-                        k = k.replace('-', '_')
-                        try:
-                            code += ', %s=%.5g' % (k, float(v))
-                        except ValueError:
-                            code += ', %s=%s' % (k, repr(v))
+                        code += ', %s=%s' % self._attrib2py(k, v)
+                code += ')'
+
+                # If the primitive contains any child options, add these, too.
+                if len(self.prim) > 0:
+                    self.need_var_name = True
+                for opt in self.prim:
+                    code += '\n'
+                    ftype = opt.tag[opt.tag.rindex('fe') + 2:]
+                    code += '%s.add(%s' % (self.var_name, repr(ftype))
+                    for k, v in opt.items():
+                        if k != 'id':
+                            code += ', %s=%s' % self._attrib2py(k, v)
+                    code += ')'
+
+                # Assign a variable name if it was referenced.
+                if self.need_var_name:
+                    code = '%s = %s' % (self.var_name, code)
 
                 # Return the final string.
-                return code + ')'
+                return code
 
         # Generate code for each underlying filter primitive.
         prim_list = []   # Ordered list of Primitives
@@ -552,11 +578,11 @@ class SvgToPythonScript(inkex.OutputExtension):
                 continue
             pobj = Primitive(prim, var2prim)
             prim_list.append(pobj)
-            var2prim[pobj.var_name] = pobj
             if pobj.src1 is not None and pobj.src1 in var2prim:
                 var2prim[pobj.src1].need_var_name = True
             if pobj.src2 is not None and pobj.src2 in var2prim:
                 var2prim[pobj.src2].need_var_name = True
+            var2prim[pobj.var_name] = pobj
         for pobj in prim_list:
             code.append(str(pobj))
 

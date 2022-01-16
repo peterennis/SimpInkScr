@@ -399,7 +399,10 @@ class SimpleObject(SVGOutputMixin):
         # Get a path version of the underlying object and use this to
         # construct a path SimpleObject.
         obj = self._inkscape_obj
-        p = path(obj.get_path())
+        try:
+            p = path(obj.get_path())
+        except TypeError:
+            _abend(_('Failed to convert object to a path'))
         p_obj = p._inkscape_obj
 
         # If only_curves was specified, replace the path with one created
@@ -464,7 +467,7 @@ class SimpleObject(SVGOutputMixin):
             elif around == 'lr':
                 around = inkex.Vector2d(bbox.right, bbox.bottom)
             else:
-                abend(_('unexpected rotation argument %s') % repr(around))
+                abend(_('Unexpected rotation argument %s') % repr(around))
         else:
             around = inkex.Vector2d(around)
 
@@ -795,6 +798,64 @@ class SimpleObject(SVGOutputMixin):
         "Return the SimpleObject's underlying inkex object."
         return self._inkscape_obj
 
+    def z_order(self, target, n=None):
+        'Raise or lower the SimpleObject in the stacking order.'
+        # These operations are performed entirely at the inkex level with
+        # no reecord at the Simple Inkscape Scripting level.  We therefore
+        # start by acquiring our inkex object and its parent.
+        obj = self._inkscape_obj
+        p_obj = obj.getparent()
+
+        # Handle the main raising and lowering operations.
+        if target == 'top':
+            # Raise to top.
+            p_obj.append(obj)
+            return
+        if target == 'bottom':
+            # Lower to bottom.
+            p_obj.insert(0, obj)
+            return
+        if target == 'raise':
+            # Raise by n objects.
+            for i in range(n or 1):
+                next = obj.getnext()
+                if next is not None:
+                    next.addnext(obj)
+            return
+        if target == 'lower':
+            # Lower by n objects.
+            for i in range(n or 1):
+                prev = obj.getprevious()
+                if prev is not None:
+                    prev.addprevious(obj)
+            return
+
+        # Handle moving an object to a specific stack position.
+        if target == 'to':
+            # Move to a specific position by inserting right *before* the
+            # next position.
+            if n is None:
+                _abend(_("z_order('to') requires a second argument"))
+            if n >= 0:
+                try:
+                    # Add before the next element.
+                    p_obj[n + 1].addprevious(obj)
+                except IndexError:
+                    # No next element: raise to top.
+                    p_obj.append(obj)
+            else:
+                n += len(p_obj)
+                if n < 1:
+                    # No previous element: lower to bottom.
+                    p_obj.insert(0, obj)
+                else:
+                    # Add after the previous element.
+                    p_obj[n].addnext(obj)
+            return
+
+        # Complain about any other input.
+        _abend(_('Unexpected z_order argument %s' % repr(target)))
+
 
 class SimplePathObject(SimpleObject):
     'A SimplePathObject is a SimpleObject to which LPEs can be applied.'
@@ -824,6 +885,30 @@ class SimplePathObject(SimpleObject):
                 obj.set('inkscape:path-effect', str(lpe))
             else:
                 obj.set('inkscape:path-effect', '%s;%s' % (pe_list, str(lpe)))
+
+    def reverse(self):
+        'Reverse the path direction.'
+        obj = self._inkscape_obj
+        obj.path = obj.path.to_absolute().reverse()
+        return self
+
+    def append(self, other):
+        'Append another path onto ours, deleting the other path.'
+        # Convert the input to a list if it's not already one.
+        if hasattr(other, '__len__'):
+            others = other
+        else:
+            others = [other]
+
+        # Process in turn each input path.
+        for p in others:
+            if not isinstance(p, SimplePathObject):
+                _abend(_('Only paths can be appended to other paths'))
+            path1 = self._inkscape_obj.path
+            path2 = p._inkscape_obj.path
+            self._inkscape_obj.path = path1 + path2
+            p.remove()
+        return self
 
 
 class SimpleMarker(SimpleObject):
@@ -985,6 +1070,7 @@ class SimpleFilter(SVGOutputMixin):
             except KeyError:
                 res_num = 1
             simp_filt._prim_tally[ftype] = res_num
+            self.simp_filt = simp_filt
             all_args = {'result': '%s%d' % (ftype[2:].lower(), res_num)}
 
             # Make "src1" and "src2" smart aliases for "in" and "in2".
@@ -1007,6 +1093,28 @@ class SimpleFilter(SVGOutputMixin):
         def get_inkex_object(self):
             "Return the SimpleFilterPrimitive's underlying inkex object."
             return self.prim
+
+        class SimpleFilterPrimitiveOption(SVGOutputMixin):
+            'Represent an option applied to an SVG filter primitive.'
+
+            def __init__(self, simp_prim, ftype, **kw_args):
+                attribs = {k.replace('_', '-'): v for k, v in kw_args.items()}
+                elem = lxml.etree.SubElement(simp_prim.prim,
+                                             inkex.addNS(ftype, 'svg'))
+                elem.update(**attribs)
+                simp_prim.prim.append(elem)
+                self.prim_opt = elem
+
+            def get_inkex_object(self):
+                "Return the SimpleFilterPrimitive's underlying inkex object."
+                return self.prim_opt
+
+        def add(self, ftype, **kw_args):
+            '''Add an option a child of an existing filter primitive and
+            return an object representation.'''
+            return self.SimpleFilterPrimitiveOption(self,
+                                                    'fe' + ftype,
+                                                    **kw_args)
 
     def add(self, ftype, **kw_args):
         'Add a primitive to a filter and return an object representation.'
