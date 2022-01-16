@@ -28,6 +28,10 @@ import lxml
 import os
 import re
 import sys
+try:
+    import numpy
+except ModuleNotFoundError:
+    pass
 
 # The following imports are provided for user convenience.
 from math import *
@@ -215,7 +219,22 @@ class SimpleTopLevel(object):
         return obj in self._simple_objs
 
 
-class SimpleObject(object):
+class SVGOutputMixin(object):
+    '''Provide an svg method for converting an underlying inkex object to
+    a string.'''
+
+    def svg(self, xmlns=False, pretty_print=False):
+        obj = self.get_inkex_object()
+        if xmlns or pretty_print:
+            # pretty_print currently implies xmlns.
+            return lxml.etree.tostring(obj,
+                                       encoding='unicode',
+                                       pretty_print=pretty_print)
+        else:
+            return obj.tostring().decode('utf-8')
+
+
+class SimpleObject(SVGOutputMixin):
     'Encapsulate an Inkscape object and additional metadata.'
 
     def __init__(self, obj, transform, conn_avoid, clip_path_obj, base_style,
@@ -416,6 +435,83 @@ class SimpleObject(object):
             new_style[k] = v
         return new_style
 
+    def _inverse_transform(self):
+        'Return an inkex.Transform that undoes the current transformation.'
+        xform = self._transform
+        m = numpy.array(list(xform.matrix) + [[0, 0, 1]])
+        m_inv = numpy.linalg.inv(m)
+        un_xform = inkex.Transform()
+        un_xform.add_matrix(m_inv[0][0], m_inv[1][0],
+                            m_inv[0][1], m_inv[1][1],
+                            m_inv[0][2], m_inv[1][2])
+        return un_xform
+
+    def rotate(self, angle, around=(0, 0), first=False):
+        'Apply a rotation transformation, optionally around a given point.'
+        # Determine the coordinates around which to rotate the shape.
+        if type(around) == str:
+            obj = self._inkscape_obj
+            un_xform = self._inverse_transform()
+            bbox = obj.bounding_box(un_xform)
+            if around in ['c', 'center']:
+                around = bbox.center
+            elif around == 'ul':
+                around = inkex.Vector2d(bbox.left, bbox.top)
+            elif around == 'ur':
+                around = inkex.Vector2d(bbox.right, bbox.top)
+            elif around == 'll':
+                around = inkex.Vector2d(bbox.left, bbox.bottom)
+            elif around == 'lr':
+                around = inkex.Vector2d(bbox.right, bbox.bottom)
+            else:
+                abend(_('unexpected rotation argument %s') % repr(around))
+        else:
+            around = inkex.Vector2d(around)
+
+        # Perform the rotation.
+        tr = inkex.Transform()
+        tr.add_rotate(angle, around.x, around.y)
+        if first:
+            self._transform = self._transform * tr
+        else:
+            self._transform = tr * self._transform
+        self._apply_transform()
+
+    def translate(self, dist, first=False):
+        'Apply a translation transformation.'
+        tr = inkex.Transform()
+        tr.add_translate(dist[0], dist[1])
+        if first:
+            self._transform = self._transform * tr
+        else:
+            self._transform = tr * self._transform
+        self._apply_transform()
+
+    def scale(self, factor, first=False):
+        'Apply a scaling transformation.'
+        try:
+            sx, sy = factor
+        except (TypeError, ValueError):
+            sx, sy = factor, factor
+        tr = inkex.Transform()
+        tr.add_scale(sx, sy)
+        if first:
+            self._transform = self._transform * tr
+        else:
+            self._transform = tr * self._transform
+        self._apply_transform()
+
+    def skew(self, angles, first=False):
+        'Apply a skew transformation.'
+        tr = inkex.Transform()
+        tr.add_skewx(angles[0])
+        tr.add_skewy(angles[1])
+        if first:
+            self._transform = self._transform * tr
+        else:
+            self._transform = tr * self._transform
+        self._apply_transform()
+
     @property
     def transform(self):
         "Return the object's current transformation as an inkex.Transform."
@@ -433,8 +529,7 @@ class SimpleObject(object):
 
     def _apply_transform(self):
         "Apply the SimpleObject's transform to the underlying SVG object."
-        if self._transform != self._inkscape_obj.transform:
-            self._inkscape_obj.set('transform', self._transform)
+        self._inkscape_obj.set('transform', self._transform)
 
     def _diff_transforms(self, objs):
         'Return a list of transformations to animate.'
@@ -498,11 +593,11 @@ class SimpleObject(object):
 
         # Return a list of transformations to apply.
         xform_list = []
-        if len(set(scale_values)) == len(objs):
+        if len(set(scale_values)) > 1:
             xform_list.append(('scale', scale_values))
-        if len(set(rot_values)) == len(objs):
+        if len(set(rot_values)) > 1:
             xform_list.append(('rotate', rot_values))
-        if len(set(xlate_values)) == len(objs):
+        if len(set(xlate_values)) > 1:
             xform_list.append(('translate', xlate_values))
         return xform_list
 
@@ -526,7 +621,7 @@ class SimpleObject(object):
             # Hence, we keep wrapping the object in successive levels of
             # groups and apply one transform to each group.
             if i > 0:
-                target = group(target)
+                target = group([target])
             anim = lxml.etree.Element('animateTransform')
             anim.set('attributeName', 'transform')
             anim.set('type', xf[0])
@@ -566,7 +661,7 @@ class SimpleObject(object):
                 continue
             vs = [o.get(a) for o in objs]
             vs = [v for v in vs if v is not None]
-            if len(set(vs)) == len(objs):
+            if len(set(vs)) > 1:
                 attr2vals[a] = vs
 
         # Handle styles specially.
@@ -577,7 +672,7 @@ class SimpleObject(object):
                 for o in objs:
                     obj_style = inkex.Style(o.get('style'))
                     vs.append(obj_style.get(a))
-                if len(set(vs)) == len(objs):
+                if len(set(vs)) > 1:
                     attr2vals[a] = vs
         return attr2vals
 
@@ -845,7 +940,7 @@ class SimpleHyperlink(SimpleGroup):
                          obj_style, track=True)
 
 
-class SimpleFilter(object):
+class SimpleFilter(SVGOutputMixin):
     'Represent an SVG filter effect.'
 
     def __init__(self, name=None, pt1=None, pt2=None,
@@ -873,10 +968,14 @@ class SimpleFilter(object):
             self.filt.set('style', style_str)
         self._prim_tally = {}
 
+    def get_inkex_object(self):
+        "Return the SimpleFilter's underlying inkex object."
+        return self.filt
+
     def __str__(self):
         return 'url(#%s)' % self.filt.get_id()
 
-    class SimpleFilterPrimitive(object):
+    class SimpleFilterPrimitive(SVGOutputMixin):
         'Represent one component of an SVG filter effect.'
 
         def __init__(self, simp_filt, ftype, **kw_args):
@@ -905,12 +1004,16 @@ class SimpleFilter(object):
             # Add a primitive to the inkex filter.
             self.prim = simp_filt.filt.add_primitive(ftype, **all_args)
 
+        def get_inkex_object(self):
+            "Return the SimpleFilterPrimitive's underlying inkex object."
+            return self.prim
+
     def add(self, ftype, **kw_args):
         'Add a primitive to a filter and return an object representation.'
         return self.SimpleFilterPrimitive(self, 'fe' + ftype, **kw_args)
 
 
-class SimpleGradient(object):
+class SimpleGradient(SVGOutputMixin):
     'Virtual base class for an SVG linear or radial gradient pattern.'
 
     # Map Inkscape repetition names to SVG names.
@@ -954,6 +1057,10 @@ class SimpleGradient(object):
         if style_str != '':
             stop.set('style', style_str)
         self.grad.append(stop)
+
+    def get_inkex_object(self):
+        "Return the SimpleGradient's underlying inkex object."
+        return self.grad
 
 
 class SimpleLinearGradient(SimpleGradient):
@@ -1001,7 +1108,7 @@ class SimpleRadialGradient(SimpleGradient):
         self.grad = grad
 
 
-class SimplePathEffect(object):
+class SimplePathEffect(SVGOutputMixin):
     'Represent an Inkscape live path effect.'
 
     def __init__(self, effect, **kwargs):
@@ -1017,6 +1124,10 @@ class SimplePathEffect(object):
         '''Return a path effect as a "#" and its ID.  This enables directly
         associating the path effect with a path.'''
         return '#%s' % self._inkscape_obj.get_id()
+
+    def get_inkex_object(self):
+        "Return the SimplePathEffect's underlying inkex object."
+        return self._inkscape_obj
 
 
 # ----------------------------------------------------------------------
@@ -1374,7 +1485,10 @@ def hyperlink(objs, href, title=None, target=None, mime_type=None,
 def inkex_object(obj, transform=None, conn_avoid=False, clip_path=None,
                  **style):
     'Expose an arbitrary inkex-created object to Simple Inkscape Scripting.'
-    return SimpleObject(obj, transform, conn_avoid, clip_path, {}, style)
+    merged_xform = inkex.Transform(transform) * obj.transform
+    base_style = obj.style
+    return SimpleObject(obj, merged_xform, conn_avoid, clip_path,
+                        base_style, style)
 
 
 def filter_effect(name=None, pt1=None, pt2=None,
