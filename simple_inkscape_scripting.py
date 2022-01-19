@@ -273,10 +273,13 @@ class SimpleObject(SVGOutputMixin):
         if ext_style != '':
             obj.style = ext_style
 
-        # Store the modified Inkscape object.
+        # Store the modified Inkscape object.  If the object is new (as
+        # opposed to having been wrapped with inkex_object), attach it to
+        # the top-level connection point.
         self._inkscape_obj = obj
-        if track:
-            _simple_top.append_obj(self)
+        if obj.getparent() is None:
+            if track:
+                _simple_top.append_obj(self)
         self.parent = None
 
     def __str__(self):
@@ -362,9 +365,9 @@ class SimpleObject(SVGOutputMixin):
                 if pt1.is_close(pt2) and pt3.is_close(pt4):
                     pt2 = (2*pt1 + pt4)/3
                     pt3 = (pt1 + 2*pt4)/3
-                    new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
-                                                      pt3.x, pt3.y,
-                                                      pt4.x, pt4.y))
+                new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
+                                                  pt3.x, pt3.y,
+                                                  pt4.x, pt4.y))
             elif isinstance(seg, inkex.paths.Line):
                 # Convert the line [a, b] to the curve [a, 1/3[a, b],
                 # 2/3[a, b], b].
@@ -382,9 +385,9 @@ class SimpleObject(SVGOutputMixin):
                 if not pt1.is_close(pt4):
                     pt2 = (2*pt1 + pt4)/3
                     pt3 = (pt1 + 2*pt4)/3
-                    new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
-                                                      pt3.x, pt3.y,
-                                                      pt4.x, pt4.y))
+                new_segs.append(inkex.paths.Curve(pt2.x, pt2.y,
+                                                  pt3.x, pt3.y,
+                                                  pt4.x, pt4.y))
                 new_segs.append(seg)
             else:
                 abend(_('internal error: unexpected path command '
@@ -405,7 +408,7 @@ class SimpleObject(SVGOutputMixin):
             _abend(_('Failed to convert object to a path'))
         p_obj = p._inkscape_obj
 
-        # If only_curves was specified, replace the path with one created
+        # If all_curves was specified, replace the path with one created
         # from the current path's CubicSuperPath segments.
         if all_curves:
             pes = self._path_to_curve(p_obj)
@@ -449,13 +452,16 @@ class SimpleObject(SVGOutputMixin):
                             m_inv[0][2], m_inv[1][2])
         return un_xform
 
-    def rotate(self, angle, around=(0, 0), first=False):
-        'Apply a rotation transformation, optionally around a given point.'
-        # Determine the coordinates around which to rotate the shape.
+    def _find_transform_point(self, around):
+        'Return the center point around which to apply a transformation.'
         if type(around) == str:
             obj = self._inkscape_obj
             un_xform = self._inverse_transform()
             bbox = obj.bounding_box(un_xform)
+            if bbox is None:
+                # Special case first encountered in Inkscape 1.2-dev when
+                # an empty layer is selected.
+                return inkex.Vector2d(0, 0)
             if around in ['c', 'center']:
                 around = bbox.center
             elif around == 'ul':
@@ -467,12 +473,15 @@ class SimpleObject(SVGOutputMixin):
             elif around == 'lr':
                 around = inkex.Vector2d(bbox.right, bbox.bottom)
             else:
-                abend(_('Unexpected rotation argument %s') % repr(around))
+                abend(_('Unexpected transform argument %s') % repr(around))
         else:
             around = inkex.Vector2d(around)
+        return around
 
-        # Perform the rotation.
+    def rotate(self, angle, around=(0, 0), first=False):
+        'Apply a rotation transformation, optionally around a given point.'
         tr = inkex.Transform()
+        around = self._find_transform_point(around)
         tr.add_rotate(angle, around.x, around.y)
         if first:
             self._transform = self._transform * tr
@@ -490,25 +499,31 @@ class SimpleObject(SVGOutputMixin):
             self._transform = tr * self._transform
         self._apply_transform()
 
-    def scale(self, factor, first=False):
+    def scale(self, factor, around=(0, 0), first=False):
         'Apply a scaling transformation.'
         try:
             sx, sy = factor
         except (TypeError, ValueError):
             sx, sy = factor, factor
+        around = self._find_transform_point(around)
         tr = inkex.Transform()
+        tr.add_translate(around)
         tr.add_scale(sx, sy)
+        tr.add_translate(-around)
         if first:
             self._transform = self._transform * tr
         else:
             self._transform = tr * self._transform
         self._apply_transform()
 
-    def skew(self, angles, first=False):
+    def skew(self, angles, around=(0, 0), first=False):
         'Apply a skew transformation.'
+        around = self._find_transform_point(around)
         tr = inkex.Transform()
+        tr.add_translate(around)
         tr.add_skewx(angles[0])
         tr.add_skewy(angles[1])
+        tr.add_translate(-around)
         if first:
             self._transform = self._transform * tr
         else:
