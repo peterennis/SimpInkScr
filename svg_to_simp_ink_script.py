@@ -264,10 +264,12 @@ class SvgToPythonScript(inkex.OutputExtension):
         rx, ry = node.get('sodipodi:rx'), node.get('sodipodi:ry')
         ang1, ang2 = node.get('sodipodi:start'), node.get('sodipodi:end')
         arc_type = node.get('sodipodi:arc-type')
+        if arc_type is None:
+            arc_type = 'slice'
         extra, extra_deps = self.extra_args(node)
         code = 'arc((%s, %s), (%s, %s), (%s, %s)' % \
             (cx, cy, rx, ry, ang1, ang2)
-        if arc_type is not None and arc_type != 'arc':
+        if arc_type != 'arc':
             code += ', arc_type=%s' % repr(arc_type)
         code += extra + ')'
         code = [code]
@@ -299,11 +301,11 @@ class SvgToPythonScript(inkex.OutputExtension):
         # Produce either a regular polygon or a star.
         if flat == 'true':
             # Regular polygon
-            code = ['regular_polygon(%s, (%s, %s), %s, ang=%s%s%s)' %
+            code = ['regular_polygon(%s, (%s, %s), %s, angles=%s%s%s)' %
                     (sides, cx, cy, r1, arg1, opt_arg_str, extra)]
         else:
             # Star
-            code = ['star(%s, (%s, %s), (%s, %s), ang=(%s, %s)%s%s)' %
+            code = ['star(%s, (%s, %s), (%s, %s), angles=(%s, %s)%s%s)' %
                     (sides, cx, cy, r1, r2, arg1, arg2, opt_arg_str, extra)]
         return self.Statement(code, node.get_id(), extra_deps)
 
