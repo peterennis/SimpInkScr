@@ -213,6 +213,11 @@ class SimpleTopLevel(object):
         except AttributeError:
             self._svg_root.defs.append(obj)
 
+    @property
+    def svg_root(self):
+        'Return the root of the SVG tree.'
+        return self._svg_root
+
     def __contains__(self, obj):
         '''Return True if a given Simple Inkscape Scripting object appears at
         the document's top level.'''
@@ -544,6 +549,57 @@ class SimpleObject(SVGOutputMixin):
         else:
             self._transform = inkex.Transform(xform)
         self._apply_transform()
+
+    @property
+    def tag(self):
+        'Return the element type of our underlying object.'
+        # Strip off the namespace prefix (e.g.,
+        # "{http://www.w3.org/2000/svg}circle" --> "circle").
+        t = self._inkscape_obj.tag
+        try:
+            t = t[t.rindex("}") + 1:]
+        except ValueError:
+            pass
+        return t
+
+    def svg_get(self, attr, as_str=False):
+        'Return the value of an SVG attribute.'
+        v = self._inkscape_obj.get(attr)
+        if v is None or as_str:
+            # None and as_str=True return strings.
+            return v
+        elif attr == 'transform':
+            # Return the transform as an inkex.Transform.
+            return inkex.Transform(v)
+        elif attr == 'style':
+            # Return the style as a dictionary.
+            return self.style()
+        else:
+            # Everything else is returned as a Python data type.
+            return _svg_str_to_python(v)
+
+    def svg_set(self, attr, val):
+        'Set the value of an SVG attribute.'
+        obj = self._inkscape_obj
+        if attr == 'transform':
+            # "transform" is a special case because we maintain a shadow
+            # copy of the current transform within the SimpleObject.
+            self.transform = val
+        elif val is None:
+            # None removes an attribute.
+            obj.attrib.pop(attr, None)   # "None" suppresses a KeyError
+        elif attr == 'style':
+            # "style" accepts a variety of data types.
+            if isinstance(val, dict):
+                # Dictionary
+                self.style(**val)
+            else:
+                # inkex.Style or other object convertible to str
+                obj.set(attr, str(val))
+        else:
+            # All other attribute values are applied directly to the
+            # underlying inkex object.
+            obj.set(attr, _python_to_svg_str(val))
 
     def _apply_transform(self):
         "Apply the SimpleObject's transform to the underlying SVG object."
@@ -1610,6 +1666,30 @@ def inkex_object(obj, transform=None, conn_avoid=False, clip_path=None,
     'Expose an arbitrary inkex-created object to Simple Inkscape Scripting.'
     merged_xform = inkex.Transform(transform) * obj.transform
     base_style = obj.style
+    if isinstance(obj, inkex.PathElement):
+        return SimplePathObject(obj, merged_xform, conn_avoid, clip_path,
+                                base_style, style)
+    if isinstance(obj, inkex.Layer):
+        # Convert the layer and recursively convert and add all its children.
+        lay = SimpleLayer(obj, merged_xform, conn_avoid, clip_path,
+                          base_style, style)
+        for o in [e for e in obj.iter() if e is not obj]:
+            o.getparent().remove(o)
+            io = inkex_object(o)
+            lay.add(io)
+        return lay
+    if isinstance(obj, inkex.Group):
+        # Convert the group and recursively convert and add all its children.
+        gr = SimpleGroup(obj, merged_xform, conn_avoid, clip_path,
+                         base_style, style)
+        for o in [e for e in obj.iter() if e is not obj]:
+            o.getparent().remove(o)
+            io = inkex_object(o)
+            gr.add(io)
+        return gr
+    if isinstance(obj, inkex.Marker):
+        return SimpleMarker(obj, merged_xform, conn_avoid, clip_path,
+                            base_style, style)
     return SimpleObject(obj, merged_xform, conn_avoid, clip_path,
                         base_style, style)
 
@@ -1688,6 +1768,41 @@ def pop_defaults():
 def path_effect(effect, **kwargs):
     'Return an object represent a live path effect.'
     return SimplePathEffect(effect, **kwargs)
+
+
+def selected_shapes():
+    '''Return a list of all directly selected shapes as Simple Inkscape
+    Scripting objects.  Layers do not count as shapes in this context.'''
+    global _simple_top
+    return [inkex_object(o)
+            for o in _simple_top.svg_root.selection
+            if not isinstance(o, inkex.Layer)]
+
+
+def all_shapes():
+    '''Return a list of all shapes in the image as Simple Inkscape
+    Scripting objects.  Layers do not count as shapes in this context.'''
+    # Acquire the root of the SVG tree.
+    global _simple_top
+    svg = _simple_top.svg_root
+
+    # Find all ShapeElements whose parent is a layer.
+    layers = {g
+              for g in svg.xpath('//svg:g')
+              if g.get('inkscape:groupmode') == 'layer'}
+    layer_shapes = [inkex_object(obj)
+                    for lay in layers
+                    for obj in lay
+                    if isinstance(obj, inkex.ShapeElement)]
+
+    # Find all ShapeElements whose parent is the root.
+    root_shapes = [inkex_object(obj)
+                   for obj in svg
+                   if isinstance(obj, inkex.ShapeElement) and
+                   obj not in layers]
+
+    # Return the combination of the two.
+    return root_shapes + layer_shapes
 
 
 # ----------------------------------------------------------------------
