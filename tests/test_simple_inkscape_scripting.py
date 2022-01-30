@@ -4,8 +4,11 @@ from inkex.tester import ComparisonMixin, InkscapeExtensionTestMixin, TestCase
 from inkex.tester.filters import CompareOrderIndependentStyle
 
 class SimpInkScrBasicTest(ComparisonMixin, InkscapeExtensionTestMixin, TestCase):
+    # Indicate how testing should be performed.
     effect_class = SimpleInkscapeScripting
     compare_filters = [CompareOrderIndependentStyle()]
+
+    # Define a few helper strings.
     animation_base = '''\
 def make_rect(center, fill, edge=100):
     return rect(inkex.Vector2d(-edge/2, -edge/2) + center,
@@ -16,6 +19,21 @@ r1 = make_rect((50, 50), '#aade87')
 r2 = make_rect((width/2, height/2), '#9955ff')
 r3 = make_rect((width - 50, height - 50), '#d35f5f')
 '''
+    blue_red = '''
+blue = rect((90, 0), (170, 50), fill='#55ddff')
+red = rect((0, 0), (80, 50), fill='#ff5555')
+'''
+    z_order = '''
+boxes = []
+ul = inkex.Vector2d()
+for c in ['beige', 'maroon', 'mediumslateblue', 'mediumseagreen', 'tan']:
+    boxes.append(rect(ul, ul + (100, 60), fill=c, opacity=0.9))
+    ul += (10, 10)
+'''
+
+    # Define all of the tests to run.  Simple Inkscape Scripting is a
+    # large, featureful extension so many tests are needed to achieve even
+    # modest coverage of all the code paths.
     comparisons = [
         # The following tests come from the Shape Construction wiki page.
         ('--program=circle((width/2, height/2), 50)',),
@@ -141,10 +159,58 @@ r1 = make_rect((50, 50), '#aade87')
 r4 = make_rect((0, 0), '#5599ff')
 r4.transform = 'translate(%.5f, %.5f) rotate(200) scale(2)' % (width/2, height/2)
 r1.animate(r4, duration='3s')
+''',),
+
+        # The following tests come from the Modifying Existing Objects wiki
+        # page.
+        ('--program=%s\nred.translate((50, 30))' % blue_red,),
+        ('--program=%s\nred.rotate(30)' % blue_red,),
+        ('--program=%s\nred.rotate(30, (85, 25))' % blue_red,),
+        ("--program=%s\nred.rotate(30, 'll')" % blue_red,),
+        ('--program=%s\nred.scale(1.5)' % blue_red,),
+        ('--program=%s\nred.scale((0.75, 1.5))' % blue_red,),
+        ("--program=%s\nred.scale(1.5, 'ur')" % blue_red,),
+        ('--program=%s\nred.skew((10, 0))' % blue_red,),
+        ("--program=%s\nred.skew((0, 10), 'lr')" % blue_red,),
+
+        # The following tests come from the Other Features wiki page.
+        ('''--program=
+house = rect((32, 64), (96, 112), fill='#ff0000', stroke_width=2)
+roof = polygon([(16, 64), (64, 16), (112, 64)], fill='#008000', stroke_width=2)
+hyperlink([house, roof], 'https://www.pakin.org/', title='My home page')
+''',),
+        ("--program=%s\nboxes[0].z_order('top')" % z_order,),
+        ("--program=%s\nboxes[-1].z_order('bottom')" % z_order,),
+        ("--program=%s\nboxes[2].z_order('raise')" % z_order,),
+        ("--program=%s\nboxes[3].z_order('lower', 2)" % z_order,),
+        ("--program=%s\nboxes[1].z_order('to', 3)" % z_order,),
+
+        # The following are additional tests intended to increase coverage.
+        ('''--program=
+p = path(['M', 150, 50,
+          'C', 100, 50, 50, 100, 50, 192,
+          'V', 300,
+          'H', 250,
+          'V', 192,
+          'C', 250, 100, 200, 50, 150, 50,
+          'Z'],
+         fill='#0055d4', stroke_width=3)
+p.to_path(all_curves=True)
 ''',)
-        
     ]
     compare_file = 'svg/default-inkscape-SVG.svg'
+
+
+class SimpInkScrModifyTest(ComparisonMixin, InkscapeExtensionTestMixin, TestCase):
+    effect_class = SimpleInkscapeScripting
+    compare_filters = [CompareOrderIndependentStyle()]
+    compare_file = 'svg/shapes.svg'
+    comparisons = [
+        ('''--program=
+for obj in all_shapes():
+    obj.rotate(15, 'center', first=True)
+''',)
+    ]
 
 
 class SimpInkScrOutputBasicTest(ComparisonMixin, TestCase):
