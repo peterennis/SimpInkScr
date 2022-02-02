@@ -151,7 +151,7 @@
        width="32"
        height="0"
        style="stroke:#2b1100;fill:#ff0000;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect7390">
+       id="rect8248">
       <animate
          attributeName="height"
          values="0; 1024"
@@ -164,7 +164,7 @@
        width="0"
        height="32"
        style="stroke:#2b1100;fill:#ff0000;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect7392">
+       id="rect8250">
       <animate
          attributeName="x"
          values="1024; 0"
@@ -190,7 +190,7 @@
        width="32"
        height="0"
        style="stroke:#2b1100;fill:#00ff00;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect7394">
+       id="rect8252">
       <animate
          attributeName="y"
          values="1024; 0"
@@ -205,18 +205,12 @@
          fill="freeze" />
     </rect>
     <rect
-       x="1024"
+       x="0"
        y="992"
        width="0"
        height="32"
        style="stroke:#2b1100;fill:#00ffff;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect7396">
-      <animate
-         attributeName="x"
-         values="1024; 0"
-         dur="2s"
-         begin="6s"
-         fill="freeze" />
+       id="rect8254">
       <animate
          attributeName="width"
          values="0; 1024"

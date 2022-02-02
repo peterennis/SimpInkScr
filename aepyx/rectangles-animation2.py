@@ -32,7 +32,7 @@ r03 = rect((992, 1024), (1024, 1024), stroke='#2b1100', fill='#00ff00', font_var
 r3 = rect((992, 0), (1024, 1024), stroke='#2b1100', fill='#00ff00', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
 r03.animate([r3], duration='2s', begin_time='4s')
 
-r04 = rect((1024, 992), (1024, 1024), stroke='#2b1100', fill='#00ffff', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
+r04 = rect((0, 992), (0, 1024), stroke='#2b1100', fill='#00ffff', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
 r4 = rect((0, 992), (1024, 1024), stroke='#2b1100', fill='#00ffff', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
 r04.animate([r4], duration='2s', begin_time='6s')
 
