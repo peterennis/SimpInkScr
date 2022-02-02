@@ -151,7 +151,7 @@
        width="32"
        height="0"
        style="stroke:#2b1100;fill:#ff0000;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect8677">
+       id="rect9190">
       <animate
          attributeName="height"
          values="0; 1024"
@@ -164,7 +164,7 @@
        width="0"
        height="32"
        style="stroke:#2b1100;fill:#ff0000;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect8679">
+       id="rect9192">
       <animate
          attributeName="x"
          values="1024; 0"
@@ -190,7 +190,7 @@
        width="32"
        height="0"
        style="stroke:#2b1100;fill:#00ff00;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect8681">
+       id="rect9194">
       <animate
          attributeName="y"
          values="1024; 0"
@@ -210,7 +210,7 @@
        width="0"
        height="32"
        style="stroke:#2b1100;fill:#00ffff;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect8683">
+       id="rect9196">
       <animate
          attributeName="width"
          values="0; 1024"
@@ -224,12 +224,26 @@
        width="0"
        height="32"
        style="stroke:#2b1100;fill:#800080;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
-       id="rect8685">
+       id="rect9198">
       <animate
          attributeName="width"
          values="0; 1024"
          dur="2s"
          begin="8s"
+         fill="freeze" />
+    </rect>
+    <rect
+       x="496"
+       y="0"
+       width="32"
+       height="0"
+       style="stroke:#2b1100;fill:#ff00ff;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
+       id="rect9200">
+      <animate
+         attributeName="height"
+         values="0; 1024"
+         dur="2s"
+         begin="10s"
          fill="freeze" />
     </rect>
   </g>

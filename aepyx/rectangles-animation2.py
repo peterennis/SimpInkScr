@@ -40,12 +40,6 @@ r05 = rect((0, 496), (0, 528), stroke='#2b1100', fill='#800080', font_variation_
 r5 = rect((0, 496), (1024, 528), stroke='#2b1100', fill='#800080', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
 r05.animate([r5], duration='2s', begin_time='8s')
 
-
-#r6 = rect((496, 0), (528, 1024), stroke='#2b1100', fill='#ff00ff', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
-
-
-
-
-
-#r1.animate([r2, r3, r4, r5, r6], duration='6s', interpolation='discrete')
-
+r06 = rect((496, 0), (528, 0), stroke='#2b1100', fill='#ff00ff', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
+r6 = rect((496, 0), (528, 1024), stroke='#2b1100', fill='#ff00ff', font_variation_settings='normal', opacity=1, vector_effect='none', fill_opacity=1, fill_rule='evenodd', stroke_width=1, stroke_linecap='butt', stroke_linejoin='miter', stroke_miterlimit=4, stroke_dasharray='none', stroke_dashoffset=0, stroke_opacity=1, _inkscape_stroke='none', stop_color='#000000', stop_opacity=1)
+r06.animate([r6], duration='2s', begin_time='10s')
