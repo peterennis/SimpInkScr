@@ -23,21 +23,21 @@ circle((100, 100), 25)   # Thin, black stroke, no fill
 
 push_defaults()
 style(fill='#d7eef4')    # Faint cyan fill
-#circle((200, 100), 25)
+circle((200, 100), 25)
 
-#push_defaults()
-#style(stroke_width=5)    # Thick stroke
-#circle((300, 100), 25)
+push_defaults()
+style(stroke_width=5)    # Thick stroke
+circle((300, 100), 25)
 
-#push_defaults()
-#style(stroke='#216778')  # Dark cyan stroke
-#circle((400, 100), 25)
+push_defaults()
+style(stroke='#216778')  # Dark cyan stroke
+circle((400, 100), 25)
 
-#pop_defaults()           # Undo dark cyan stroke
-#circle((500, 100), 25)
+pop_defaults()           # Undo dark cyan stroke
+circle((500, 100), 25)
 
-#pop_defaults()           # Undo thick stroke
-#circle((600, 100), 25)
+pop_defaults()           # Undo thick stroke
+circle((600, 100), 25)
 
-#pop_defaults()           # Undo faint cyan fill
-#circle((700, 100), 25)
+pop_defaults()           # Undo faint cyan fill
+circle((700, 100), 25)
