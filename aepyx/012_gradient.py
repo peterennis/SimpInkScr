@@ -1,7 +1,7 @@
 # This Python script is intended to be run from Inkscape's Simple
 # Inkscape Scripting extension.
 
-# Force the animation to respond to screen size.
+# Respond to screen size.
 svg_root.set('width', '100%')
 svg_root.set('height', '100%')
 
