@@ -20,6 +20,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 '''
 
 import base64
+import collections.abc
 import io
 import math
 import os
@@ -216,6 +217,42 @@ class SimpleTopLevel():
         '''Return True if a given Simple Inkscape Scripting object appears at
         the document's top level.'''
         return obj in self._simple_objs
+
+    @property
+    def width(self):
+        'Return the width of the SVG document.'
+        try:
+            # Inkscape 1.2+
+            return self._svg_root.viewbox_width
+        except AttributeError:
+            # Inkscape 1.0 and 1.1
+            return self._svg_root.width
+
+    @property
+    def height(self):
+        'Return the height of the SVG document.'
+        try:
+            # Inkscape 1.2+
+            return self._svg_root.viewbox_height
+        except AttributeError:
+            # Inkscape 1.0 and 1.1
+            return self._svg_root.height
+
+    def get_existing_guides(self):
+        '''Return a list of existing Inkscape guides as Simple Inkscape
+        Scripting Guide objects.'''
+        guides = []
+        for iobj in self._svg_root.namedview.xpath('//sodipodi:guide'):
+            guides.append(Guide._from_inkex_object(iobj))
+        return guides
+
+    def replace_all_guides(self, guides):
+        'Replace all guides in the document with those in the given list.'
+        for iobj in self._svg_root.namedview.xpath('//sodipodi:guide'):
+            iobj.getparent().remove(iobj)
+        nv = self._svg_root.namedview
+        for obj in guides:
+            nv.add(obj.get_inkex_object())
 
 
 class SVGOutputMixin():
@@ -1324,6 +1361,87 @@ class SimplePathEffect(SVGOutputMixin):
         return self._inkscape_obj
 
 
+class Guide(SVGOutputMixin):
+    'Represent an Inkscape guide.'
+
+    def __init__(self, pos, angle, color=None):
+        'Create a guide at a given position and angle.'
+        # pos is stored in user coordinates, and angle is clockwise.
+        # In contrast, inkex expects pos to be relative to a
+        # lower-left origin and angle to be counter-clockwise.
+        global _simple_top
+        self._inkscape_obj = inkex.elements.Guide()
+        self._move_to_wrapper(pos, angle)
+        self.color = color
+
+    def get_inkex_object(self):
+        "Return the guide's underlying inkex object."
+        return self._inkscape_obj
+
+    def _move_to_wrapper(self, pos, angle):
+        "Wrap inkex's move_to with a coordinate transformation."
+        global _simple_top
+        self._pos = pos
+        self._angle = angle
+        pos = (pos[0], _simple_top.height - pos[1])
+        angle = -angle
+        self._inkscape_obj.move_to(pos[0], pos[1], angle)
+
+    @property
+    def position(self):
+        "Return the guide's current position."
+        return self._pos
+
+    @position.setter
+    def position(self, pos):
+        "Set the guide's current position."
+        self._move_to_wrapper(pos, self._angle)
+
+    @property
+    def angle(self):
+        "Return the guide's current angle."
+        return self._angle
+
+    @angle.setter
+    def angle(self, ang):
+        "Set the guide's current angle."
+        self._move_to_wrapper(self._pos, ang)
+
+    @property
+    def color(self):
+        "Return the guide's current color."
+        return self._color
+
+    @color.setter
+    def color(self, c):
+        "Change the guide's color."
+        if c is None:
+            self._inkscape_obj.attrib.pop('inkscape:color', None)
+        else:
+            self._inkscape_obj.set('inkscape:color', str(c))
+        self._color = c
+
+    @classmethod
+    def _from_inkex_object(self, iobj):
+        'Create a Simple Inkscape Scripting Guide from an inkex guide object.'
+        # Convert the point from the pre-Inkscape 1.0 coordinate system.
+        pt = iobj.point
+        pos = (pt.x, _simple_top.height - pt.y)
+
+        # Compute the angle at which the guide is oriented.
+        try:
+            # Inkscape 1.2+
+            angle = math.degrees(iobj.orientation.angle)
+        except AttributeError:
+            # Inkscape 1.0 and 1.1
+            orient = [float(s) for s in iobj.get('orientation').split(',')]
+            angle = 180 - math.degrees(math.atan2(orient[0], orient[1]))
+        angle = -angle
+
+        # Return a Simple Inkscape Scripting Guide.
+        return Guide(pos, angle)
+
+
 # ----------------------------------------------------------------------
 
 # The following functions represent the Simple Inkscape Scripting API
@@ -1801,6 +1919,11 @@ def all_shapes():
     return root_shapes + layer_shapes
 
 
+def guide(pos, angle, color=None):
+    'Create a new guide without adding it to the document.'
+    return Guide(pos, angle, color)
+
+
 # ----------------------------------------------------------------------
 
 class SimpleInkscapeScripting(inkex.EffectExtension):
@@ -1851,15 +1974,10 @@ class SimpleInkscapeScripting(inkex.EffectExtension):
 
         # Prepare global values we want to export.
         sis_globals = globals().copy()
-        try:
-            # Inkscape 1.2+
-            sis_globals['width'] = self.svg.viewbox_width
-            sis_globals['height'] = self.svg.viewbox_height
-        except AttributeError:
-            # Inkscape 1.0 and 1.1
-            sis_globals['width'] = self.svg.width
-            sis_globals['height'] = self.svg.height
         sis_globals['svg_root'] = self.svg
+        sis_globals['width'] = _simple_top.width
+        sis_globals['height'] = _simple_top.height
+        sis_globals['guides'] = _simple_top.get_existing_guides()
         sis_globals['print'] = _debug_print
         try:
             # Inkscape 1.2+
@@ -1893,6 +2011,7 @@ from inkex.paths import Arc, Curve, Horz, Line, Move, Quadratic, Smooth, \
             exec(code, sis_globals)
         except SystemExit:
             pass
+        _simple_top.replace_all_guides(sis_globals['guides'])
 
 
 if __name__ == '__main__':
