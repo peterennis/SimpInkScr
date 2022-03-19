@@ -8,7 +8,7 @@
    version="1.1"
    id="svg900"
    inkscape:version="1.1.1 (3bf5ae0d25, 2021-09-20)"
-   sodipodi:docname="rectangles.svg"
+   sodipodi:docname="rectangles-test.svg"
    xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape"
    xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd"
    xmlns="http://www.w3.org/2000/svg"
@@ -201,7 +201,7 @@
      inkscape:label="Small Rectangles"
      style="display:inline">
     <rect
-       style="font-variation-settings:normal;display:inline;vector-effect:none;fill:#ff0000;fill-opacity:1;fill-rule:evenodd;stroke:none;stroke-width:0.707107;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000"
+       style="font-variation-settings:normal;display:inline;vector-effect:none;fill:#ff0000;fill-opacity:1;fill-rule:evenodd;stroke:#2b1100;stroke-width:0.707107;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000"
        id="r21"
        width="32"
        height="512"
@@ -228,5 +228,44 @@
        height="32"
        x="0"
        y="480" />
+    <rect
+       x="0"
+       y="0"
+       width="32"
+       height="0"
+       style="stroke:#2b1100;fill:#ff0000;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
+       id="rect914">
+      <animate
+         attributeName="height"
+         values="0; 1024"
+         dur="2s"
+         fill="freeze" />
+    </rect>
+    <rect
+       x="1024"
+       y="0"
+       width="0"
+       height="32"
+       style="stroke:#2b1100;fill:#ff0000;font-variation-settings:normal;opacity:1;vector-effect:none;fill-opacity:1;fill-rule:evenodd;stroke-width:1;stroke-linecap:butt;stroke-linejoin:miter;stroke-miterlimit:4;stroke-dasharray:none;stroke-dashoffset:0;stroke-opacity:1;-inkscape-stroke:none;stop-color:#000000;stop-opacity:1"
+       id="rect916">
+      <animate
+         attributeName="x"
+         values="1024; 0"
+         dur="2s"
+         begin="2s"
+         fill="freeze" />
+      <animate
+         attributeName="width"
+         values="0; 1024"
+         dur="2s"
+         begin="2s"
+         fill="freeze" />
+      <animate
+         attributeName="fill"
+         values="#ff0000; #ffff00"
+         dur="2s"
+         begin="2s"
+         fill="freeze" />
+    </rect>
   </g>
 </svg>
