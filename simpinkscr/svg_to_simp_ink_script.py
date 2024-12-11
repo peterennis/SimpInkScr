@@ -1,7 +1,7 @@
 #! /usr/bin/env python
 
 '''
-Copyright (C) 2021-2022 Scott Pakin, scott-ink@pakin.org
+Copyright (C) 2021-2023 Scott Pakin, scott-ink@pakin.org
 
 This program is free software; you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@ Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA
 import inkex
 from inkex.localization import inkex_gettext as _
 import math
+import pprint
 import re
 
 
@@ -39,9 +40,6 @@ class SvgToPythonScript(inkex.OutputExtension):
 
     # SVG uses both spaces and commas to separate numbers.
     sep_re = re.compile(r'[\s,]+')
-
-    # We separate command characters in path strings from adjoining numbers.
-    char_re = re.compile(r'([A-Za-z])')
 
     class Statement(object):
         '''Represent a Python statement (or multiple related statements)
@@ -96,6 +94,29 @@ class SvgToPythonScript(inkex.OutputExtension):
                 except KeyError:
                     pass
 
+    def number_to_pixels(self, val, pct_of=None, default=None):
+        '''Convert a textual number that may include units (e.g., "3mm") to a
+        floating-point number of pixels.'''
+        # Return the default if given None.
+        if val is None:
+            return default
+
+        # Convert a percentage to a number.
+        try:
+            pidx = val.index('%')
+            if pct_of is None:
+                raise ValueError('unexpected percentage value')
+            elif pct_of == 'wd':
+                pct_of = self.svg.viewport_width
+            elif pct_of == 'ht':
+                pct_of = self.svg.viewport_height
+            return float(val[:pidx])*pct_of/100.0
+        except ValueError:
+            pass   # Not a percentage
+
+        # Convert from any unit to pixels.
+        return inkex.units.convert_unit(val, 'px')
+
     def transform_arg(self, node):
         "Return an SVG node's transform string as a function argument."
         xform = node.get('transform')
@@ -119,6 +140,41 @@ class SvgToPythonScript(inkex.OutputExtension):
         c_path_var = self.Statement.id2var(c_path[5:-1])
         return ', clip_path=%s' % c_path_var, [c_path_var]
 
+    def mask_arg(self, node):
+        """Return an SVG node's mask string as a function argument.
+        Also return additional object dependencies from url(#...) values."""
+        m = node.get('mask')
+        if m is None:
+            return '', []
+        mask_var = self.Statement.id2var(m[5:-1])
+        return ', mask=%s' % mask_var, [mask_var]
+
+    # Enumerate known presentation attributes.
+    presentation_attributes = [
+        'clip-rule',
+        'color',
+        'color-interpolation',
+        'color-rendering',
+        'cursor',
+        'display',
+        'fill',
+        'fill-opacity',
+        'fill-rule',
+        'filter',
+        'opacity',
+        'pointer-events',
+        'shape-rendering',
+        'stroke',
+        'stroke-dasharray',
+        'stroke-dashoffset',
+        'stroke-linecap',
+        'stroke-linejoin',
+        'stroke-miterlimit',
+        'stroke-opacity',
+        'stroke-width',
+        'vector-effect',
+        'visibility']
+
     def style_args(self, node, def_svg_style, def_sis_style):
         """Return an SVG node's style string as key=value arguments.  Also
         return additional object dependencies from url(#...) values."""
@@ -128,7 +184,7 @@ class SvgToPythonScript(inkex.OutputExtension):
             def_svg_style = {'stroke': None,
                              'fill': None}
 
-        # Convert the style string to a dictionary.
+        # Start with the default SVG style.
         style = node.get('style')
         style_dict = def_svg_style.copy()
         try:
@@ -146,6 +202,15 @@ class SvgToPythonScript(inkex.OutputExtension):
             k2 = k.replace('-', '_')
             if k in style_dict or k2 in style_dict:
                 style_dict[k] = None
+
+        # Append known presentation attributes to the dictionary.
+        for attr in self.presentation_attributes:
+            val = node.get(attr)
+            if val is not None:
+                k = attr.replace('-', '_')
+                style_dict[k] = str(self._svg_str_to_python(val))
+
+        # Append styles specified in the style string to the dictionary.
         if style is not None:
             for term in style.split(';'):
                 # Convert the key from SVG to Python syntax.
@@ -155,7 +220,7 @@ class SvgToPythonScript(inkex.OutputExtension):
                 # Convert the value from a string to another type if possible.
                 try:
                     # Number -- format and use.
-                    style_dict[k] = '%.5g' % float(v)
+                    style_dict[k] = '%.10g' % float(v)
                 except ValueError:
                     # String -- quote if not already quoted.
                     try:
@@ -195,14 +260,17 @@ class SvgToPythonScript(inkex.OutputExtension):
         if def_sis_style is None:
             def_sis_style = self._common_sis_defaults
         clip_args, c_deps = self.clip_path_arg(node)
+        mask_args, m_deps = self.mask_arg(node)
         style_args, s_deps = \
             self.style_args(node, def_svg_style, def_sis_style)
         args = [self.transform_arg(node),
                 self.conn_avoid_arg(node),
                 clip_args,
+                mask_args,
                 style_args]
         deps = set()
         deps.update(c_deps)
+        deps.update(m_deps)
         deps.update(s_deps)
         return ''.join(args), list(deps)
 
@@ -221,24 +289,31 @@ class SvgToPythonScript(inkex.OutputExtension):
             return self.convert_arc(node)
 
         # Handle the case of an ordinary circle.
-        cx, cy, r = node.get('cx'), node.get('cy'), node.get('r')
+        cx = self.number_to_pixels(node.get('cx'), pct_of='wd', default=0)
+        cy = self.number_to_pixels(node.get('cy'), pct_of='ht', default=0)
+        r = self.number_to_pixels(node.get('r'), default=0)
         extra, extra_deps = self.extra_args(node)
-        code = ['circle((%s, %s), %s%s)' % (cx, cy, r, extra)]
+        code = ['circle((%.10g, %.10g), %.10g%s)' % (cx, cy, r, extra)]
         return self.Statement(code, node.get_id(), extra_deps)
 
     def convert_ellipse(self, node):
         'Return Python code for drawing an ellipse.'
-        cx, cy = node.get('cx'), node.get('cy')
-        rx, ry = node.get('rx'), node.get('ry')
+        cx = self.number_to_pixels(node.get('cx'), pct_of='wd', default=0)
+        cy = self.number_to_pixels(node.get('cy'), pct_of='ht', default=0)
+        rx = self.number_to_pixels(node.get('rx'), pct_of='wd')
+        ry = self.number_to_pixels(node.get('ry'), pct_of='ht')
         extra, extra_deps = self.extra_args(node)
-        code = ['ellipse((%s, %s), (%s, %s)%s)' % (cx, cy, rx, ry, extra)]
+        code = ['ellipse((%.10g, %.10g), (%.10g, %.10g)%s)' %
+                (cx, cy, rx, ry, extra)]
         return self.Statement(code, node.get_id(), extra_deps)
 
     def convert_rectangle(self, node):
         'Return Python code for drawing a rectangle.'
         # Acquire a rect's required parameters.
-        x, y = float(node.get('x')), float(node.get('y'))
-        wd, ht = float(node.get('width')), float(node.get('height'))
+        x = self.number_to_pixels(node.get('x'), pct_of='wd', default=0)
+        y = self.number_to_pixels(node.get('y'), pct_of='ht', default=0)
+        wd = self.number_to_pixels(node.get('width'), pct_of='wd', default=0)
+        ht = self.number_to_pixels(node.get('height'), pct_of='ht', default=0)
         extra, extra_deps = self.extra_args(node)
 
         # Handle the optional corner-rounding parameter.
@@ -248,19 +323,22 @@ class SvgToPythonScript(inkex.OutputExtension):
         elif rx is not None:
             extra = ', round=%s%s' % (rx, extra)
         elif ry is not None:
-            extra = ', round%s%s' % (ry, extra)
+            extra = ', round=%s%s' % (ry, extra)
 
         # Return a complete call to rect.
-        code = ['rect((%.5g, %.5g), (%.5g, %.5g)%s)' %
+        code = ['rect((%.10g, %.10g), (%.10g, %.10g)%s)' %
                 (x, y, x + wd, y + ht, extra)]
         return self.Statement(code, node.get_id(), extra_deps)
 
     def convert_line(self, node):
         'Return Python code for drawing a line.'
-        x1, y1 = node.get('x1'), node.get('y1')
-        x2, y2 = node.get('x2'), node.get('y2')
+        x1 = self.number_to_pixels(node.get('x1'), pct_of='wd', default=0)
+        y1 = self.number_to_pixels(node.get('y1'), pct_of='ht', default=0)
+        x2 = self.number_to_pixels(node.get('x2'), pct_of='wd', default=0)
+        y2 = self.number_to_pixels(node.get('y2'), pct_of='ht', default=0)
         extra, extra_deps = self.extra_args(node)
-        code = ['line((%s, %s), (%s, %s)%s)' % (x1, y1, x2, y2, extra)]
+        code = ['line((%.10g, %.10g), (%.10g, %.10g)%s)' %
+                (x1, y1, x2, y2, extra)]
         return self.Statement(code, node.get_id(), extra_deps)
 
     def convert_poly(self, node, poly):
@@ -363,18 +441,17 @@ class SvgToPythonScript(inkex.OutputExtension):
             return self.convert_connector(node)
 
         # Handle the case of a generic path.
-        d_str = node.get('inkscape:original-d') or node.get('d')
-        d_str = self.char_re.sub(r' \1 ', d_str).strip()
-        toks = self.sep_re.split(d_str)
         cmds = []
-        for t in toks:
-            try:
-                # Number
-                f = float(t)
-                cmds.append(t)
-            except ValueError:
-                # String
-                cmds.append(repr(t))
+        d_str = node.get('inkscape:original-d') or node.get('d')
+        path_obj = inkex.Path(d_str)
+        for c in path_obj:
+            cmd_name = c.name
+            if cmd_name in ['arc', 'line']:
+                # Specify an explicit namespace for path command names that
+                # conflict with Simple Inkscape Scripting command names.
+                cmd_name = 'inkex.paths.' + cmd_name
+            cmds.append('%s(%s)' %
+                        (cmd_name, ', '.join([str(a) for a in c.args])))
         extra, extra_deps = self.extra_args(node)
 
         # Depend on any path effects applied to the path.
@@ -415,12 +492,13 @@ class SvgToPythonScript(inkex.OutputExtension):
         all_deps = set(tpaths)
 
         # Convert the initial text object.
-        x, y = node.get('x'), node.get('y')
+        x = self.number_to_pixels(node.get('x'), pct_of='wd', default=0)
+        y = self.number_to_pixels(node.get('y'), pct_of='ht', default=0)
         msg = node.text
         if msg is None:
             msg = ''
         extra, extra_deps = self.extra_args(node, {}, {})
-        code = ['text(%s, (%s, %s)%s%s)' %
+        code = ['text(%s, (%.10g, %.10g)%s%s)' %
                 (repr(msg), x, y, tpath_str, extra)]
         all_deps = all_deps.union(extra_deps)
 
@@ -434,12 +512,15 @@ class SvgToPythonScript(inkex.OutputExtension):
                 # The text within a <tspan> can have a specified position
                 # and style.
                 need_var_name = True
-                x, y = tspan.get('x'), tspan.get('y')
+                x = self.number_to_pixels(tspan.get('x'),
+                                          pct_of='wd', default=0)
+                y = self.number_to_pixels(tspan.get('y'),
+                                          pct_of='ht', default=0)
                 extra, extra_deps = self.extra_args(tspan, {})
                 all_deps = all_deps.union(extra_deps)
                 if x is not None and y is not None:
                     # Specified position
-                    code.append('%s.add_text(%s, (%s, %s)%s)' %
+                    code.append('%s.add_text(%s, (%.10g, %.10g)%s)' %
                                 (var_name, repr(tspan.text), x, y, extra))
                 else:
                     # Unspecified position
@@ -457,7 +538,8 @@ class SvgToPythonScript(inkex.OutputExtension):
 
     def convert_image(self, node):
         'Return Python code for including an image.'
-        x, y = node.get('x'), node.get('y')
+        x = self.number_to_pixels(node.get('x'), pct_of='wd', default=0)
+        y = self.number_to_pixels(node.get('y'), pct_of='ht', default=0)
         href = node.get('xlink:href')
         absref = node.get('sodipodi:absref')
         extra, extra_deps = self.extra_args(node, {}, {})
@@ -476,6 +558,29 @@ class SvgToPythonScript(inkex.OutputExtension):
             # Non-embedded image.  We were given a URL but not a filename.
             code = ['image(%s, (%s, %s), embed=False%s)' %
                     (repr(href), x, y, extra)]
+        return self.Statement(code, node.get_id(), extra_deps)
+
+    def convert_foreign(self, node):
+        'Return Python code for including XML from a foreign namespace.'
+        # Acquire a foreign's required parameters.
+        x = self.number_to_pixels(node.get('x'), pct_of='wd', default=0)
+        y = self.number_to_pixels(node.get('y'), pct_of='ht', default=0)
+        wd = self.number_to_pixels(node.get('width'), pct_of='wd', default=0)
+        ht = self.number_to_pixels(node.get('height'), pct_of='ht', default=0)
+        extra, extra_deps = self.extra_args(node, def_svg_style={})
+
+        # foreign will almost always include a child.
+        try:
+            # Common case
+            xml = repr(node[0].tostring().decode('utf-8'))
+            extra = ', ' + xml + extra
+        except IndexError:
+            # Empty contents
+            pass
+
+        # Return a complete call to foreign.
+        code = ['foreign((%.10g, %.10g), (%.10g, %.10g)%s)' %
+                (x, y, x + wd, y + ht, extra)]
         return self.Statement(code, node.get_id(), extra_deps)
 
     def convert_clone(self, node):
@@ -516,6 +621,9 @@ class SvgToPythonScript(inkex.OutputExtension):
             filt_args.append('filter_units=%s' % repr(f_units))
         if p_units is not None:
             filt_args.append('primitive_units=%s' % repr(p_units))
+        auto_reg = node.get('inkscape:auto-region')
+        if auto_reg is not None:
+            filt_args.append('auto_region=%s' % auto_reg.capitalize())
         extra, extra_deps = self.extra_args(node, {}, {})
         if extra != '':
             filt_args.append(extra[2:])  # Drop the leading ", ".
@@ -655,7 +763,7 @@ class SvgToPythonScript(inkex.OutputExtension):
             # The stop offset is a mandatory field.
             if not isinstance(stop, inkex.Stop):
                 continue
-            stop_args = ['%s' % stop.offset]
+            stop_args = [str(self._svg_str_to_python(str(stop.offset)))]
 
             # stop-color and stop-opacity can be expressed directly or
             # within a style.  We therefore have to look in both places.
@@ -757,6 +865,18 @@ class SvgToPythonScript(inkex.OutputExtension):
         stmt.delete_if_unused = True
         return stmt
 
+    def convert_mask(self, node):
+        'Return Python code that defines a mask.'
+        m_var = self.Statement.id2var(node[0].get_id())
+        m_units = node.get('maskUnits')
+        if m_units is None:
+            code = ['mask(%s)' % m_var]
+        else:
+            code = ['mask(%s, mask_units=%s)' % (m_var, repr(m_units))]
+        stmt = self.Statement(code, node.get_id(), [m_var])
+        stmt.delete_if_unused = True
+        return stmt
+
     def convert_marker(self, node):
         'Return Python code that defines a marker.'
         # Mark all of our descendants as lying within a marker.  This
@@ -782,7 +902,7 @@ class SvgToPythonScript(inkex.OutputExtension):
             marker_args.append('marker_units=%s' % repr(m_units))
         if v_box is not None:
             x0, y0, wd, ht = [float(c) for c in v_box.split()]
-            marker_args.append('view_box=((%.5g, %.5g), (%.5g, %.5g))' %
+            marker_args.append('view_box=((%.10g, %.10g), (%.10g, %.10g))' %
                                (x0, y0, x0 + wd, y0 + ht))
 
         # Generate code and wrap it in a statement.
@@ -859,6 +979,7 @@ class SvgToPythonScript(inkex.OutputExtension):
             # Skip "special" keys.
             if k in ['effect', 'id']:
                 continue
+            k = k.replace('-', '_')
             args.append('%s=%s' % (k, self._svg_str_to_python(v)))
 
         # Generate code and wrap it in a statement.
@@ -877,25 +998,39 @@ class SvgToPythonScript(inkex.OutputExtension):
             # Inkscape 1.0 and 1.1
             height = self.svg.height
 
-        # Convert the point from the pre-Inkscape 1.0 coordinate system.
-        pt = node.point
-        pos = (pt.x, height - pt.y)
+        # Find the guide's anchor point.
+        try:
+            # Inkscape 1.3+
+            pos = node.position
+        except AttributeError:
+            # Inkscape 1.2
+            pt = node.point
+            try:
+                pos = (pt.x, self.svg.viewbox_height - pt.y)
+            except AttributeError:
+                # Inkscape 1.0 and 1.1
+                pos = (pt.x, self.svg.height - pt.y)
 
         # Compute the angle at which the guide is oriented.
         try:
             # Inkscape 1.2+
-            angle = math.degrees(node.orientation.angle)
+            angle = 90 - math.degrees(node.orientation.angle)
         except AttributeError:
             # Inkscape 1.0 and 1.1
             orient = [float(s) for s in node.get('orientation').split(',')]
             angle = 180 - math.degrees(math.atan2(orient[0], orient[1]))
-        angle = -angle
+            angle = -angle
 
         # Determine if we were given a color.
         extra = ''
         color = node.get('inkscape:color')
         if color is not None:
             extra = ', color=%s' % repr(color)
+
+        # Determine if we were given a label.
+        label = node.get('inkscape:label')
+        if label is not None:
+            extra += ', label=%s' % repr(label)
 
         # Generate code and wrap it in a statement.
         code = ['guides.append(guide((%.10g, %.10g), %.10g%s))' %
@@ -905,25 +1040,29 @@ class SvgToPythonScript(inkex.OutputExtension):
     def convert_all_shapes(self):
         'Convert each SVG shape to a Python statement.'
         stmts = []
-        for node in self.svg.xpath('//svg:circle | '
-                                   '//svg:ellipse | '
-                                   '//svg:rect | '
-                                   '//svg:line | '
-                                   '//svg:polyline | '
-                                   '//svg:polygon | '
-                                   '//svg:path | '
-                                   '//svg:text | '
-                                   '//svg:image | '
-                                   '//svg:use | '
-                                   '//svg:g | '
-                                   '//svg:filter | '
-                                   '//svg:linearGradient | '
-                                   '//svg:radialGradient | '
-                                   '//svg:clipPath | '
-                                   '//svg:marker | '
-                                   '//svg:a | '
-                                   '//inkscape:path-effect | '
-                                   '//sodipodi:guide'):
+        known_tags = ('//svg:circle | '
+                      '//svg:ellipse | '
+                      '//svg:rect | '
+                      '//svg:line | '
+                      '//svg:polyline | '
+                      '//svg:polygon | '
+                      '//svg:path | '
+                      '//svg:text | '
+                      '//svg:image | '
+                      '//svg:foreignObject | '
+                      '//svg:use | '
+                      '//svg:g | '
+                      '//svg:filter | '
+                      '//svg:linearGradient | '
+                      '//svg:radialGradient | '
+                      '//svg:clipPath | '
+                      '//svg:marker | '
+                      '//svg:a | '
+                      '//inkscape:path-effect | '
+                      '//sodipodi:guide')
+        if hasattr(inkex, 'Mask'):
+            known_tags += ' | //svg:mask'  # Inkscape 1.2+
+        for node in self.svg.xpath(known_tags):
             if isinstance(node, inkex.Circle):
                 stmts.append(self.convert_circle(node))
             elif isinstance(node, inkex.Ellipse):
@@ -942,6 +1081,8 @@ class SvgToPythonScript(inkex.OutputExtension):
                 stmts.append(self.convert_text(node))
             elif isinstance(node, inkex.Image):
                 stmts.append(self.convert_image(node))
+            elif isinstance(node, inkex.ForeignObject):
+                stmts.append(self.convert_foreign(node))
             elif isinstance(node, inkex.Use):
                 stmts.append(self.convert_clone(node))
             elif isinstance(node, inkex.Group):
@@ -954,6 +1095,8 @@ class SvgToPythonScript(inkex.OutputExtension):
                 stmts.append(self.convert_radial_gradient(node))
             elif isinstance(node, inkex.ClipPath):
                 stmts.append(self.convert_clip_path(node))
+            elif hasattr(inkex, 'Mask') and isinstance(node, inkex.Mask):
+                stmts.append(self.convert_mask(node))  # Inkscape 1.2+
             elif isinstance(node, inkex.Marker):
                 stmts.append(self.convert_marker(node))
             elif isinstance(node, inkex.Anchor):
@@ -997,13 +1140,175 @@ class SvgToPythonScript(inkex.OutputExtension):
             seen.add(stmt)
         return ordered_code
 
+    def _write_license(self, stream):
+        '''If license data exists, write it to the stream.  This is a helper
+        method for write_header.'''
+        meta = self.svg.metadata
+        info = {}
+
+        # Search for a license URL.
+        elt = meta.find('./{%s}RDF/{%s}Work/{%s}license' %
+                        (self.rdf, self.cc, self.cc))
+        if elt is not None:
+            info['url'] = elt.get('{%s}resource' % self.rdf)
+
+        # Search for permits, requires, and prohibits elements.
+        for key in ['permits', 'requires', 'prohibits']:
+            for elt in meta.findall('./{%s}RDF/{%s}License/{%s}%s' %
+                                    (self.rdf, self.cc, self.cc, key)):
+                res = elt.get('{%s}resource' % self.rdf)
+                if res is None:
+                    continue
+                try:
+                    info[key].append(res)
+                except KeyError:
+                    info[key] = [res]
+
+        # Remove keys with None values.  Write the license data, if any.
+        info = {k: v for k, v in info.items() if v is not None}
+        if info == {}:
+            return
+        stream.write("# Define the document's usage"
+                     " license.\n".encode('utf-8'))
+        pp = pprint.PrettyPrinter(width=68, sort_dicts=False)
+        prefix = 'info ='
+        for ln in pp.pformat(info).split('\n'):
+            ln = '%s %s\n' % (prefix, ln)
+            stream.write(ln.encode('utf-8'))
+            prefix = '      '
+        stream.write("\n".encode('utf-8'))
+
+    def _write_metadata(self, stream):
+        '''Write various metadata to the stream.  This is a helper
+        method for write_header.'''
+        meta = self.svg.metadata
+        work = meta.find('./{%s}RDF/{%s}Work' % (self.rdf, self.cc))
+        if work is None:
+            return
+        metadata = {}
+
+        # Handle simple text strings.
+        for key in [
+                'title',
+                'date',
+                'identifier',
+                'source',
+                'relation',
+                'language',
+                'coverage',
+                'description']:
+            try:
+                metadata[key] = work.find('./{%s}%s' % (self.dc, key)).text
+            except AttributeError:
+                pass
+
+        # Handle text strings nested within <cc:Agent><dc:title>.
+        for key in [
+                'creator',
+                'rights',
+                'publisher',
+                'contributors']:
+            try:
+                elt = work.find('./{%s}%s/{%s}Agent/{%s}title' %
+                                (self.dc, key, self.cc, self.dc))
+                metadata[key] = elt.text
+            except AttributeError:
+                pass
+
+        # Handle keywords specially.
+        bag = work.find('./{%s}subject/{%s}Bag' % (self.dc, self.rdf))
+        if bag is not None:
+            metadata['keywords'] = [item.text
+                                    for item in bag.findall('./{%s}li' %
+                                                            self.rdf)]
+
+        # Write all of the metadata we found.
+        if metadata == {}:
+            return
+        stream.write('# Specify various document metadata.\n'.encode('utf-8'))
+        try:
+            # Rename date to raw_date.
+            metadata['raw_date'] = metadata['date']
+            del metadata['date']
+        except KeyError:
+            pass
+        for key, value in sorted(metadata.items()):
+            ln = 'metadata.%s = %s\n' % (key, repr(value))
+            stream.write(ln.encode('utf-8'))
+        stream.write('\n'.encode('utf-8'))
+
+    def write_header(self, stream):
+        'Write header comments, and set the canvas size.'
+        # Define the namespaces used by Inkscape metadata.  Although this
+        # is a bit of a hack, use the namespaces from the <svg> element if
+        # available.  The reason is that xmlns:cc is sometimes set to
+        # http://creativecommons.org/ns# and sometimes to
+        # http://web.resource.org/cc/.  Use of the wrong one causes
+        # Inkscape not to recognize the metadata.
+        try:
+            self.rdf = self.svg.nsmap['rdf']
+        except KeyError:
+            self.rdf = 'http://www.w3.org/1999/02/22-rdf-syntax-ns#'
+        try:
+            self.cc = self.svg.nsmap['cc']
+        except KeyError:
+            self.cc = 'http://creativecommons.org/ns#'
+        try:
+            self.dc = self.svg.nsmap['dc']
+        except KeyError:
+            self.dc = 'http://purl.org/dc/elements/1.1/'
+
+        # Gather some document information.
+        try:
+            # Inkscape 1.2+
+            svg_width = self.svg.viewport_width
+            svg_height = self.svg.viewport_height
+        except AttributeError:
+            # Inkscape 1.1
+            svg_width = self.svg.width
+            svg_height = self.svg.height
+        svg_viewbox = self.svg.get_viewbox()
+        if svg_viewbox == [0, 0, 0, 0]:
+            svg_viewbox = [0, 0, svg_width, svg_height]
+        pages = [node
+                 for node in self.svg.xpath('//inkscape:page')
+                 if isinstance(node, inkex.Page)]
+
+        header = '''\
+###################################################
+# This Python script is intended to be run from   #
+# Inkscape's Simple Inkscape Scripting extension. #
+###################################################
+
+'''
+        canvas_cmt = '#'     # Normally comment out canvas modifications.
+        if len(pages) >= 1:
+            canvas_cmt = ''  # Set the canvas if we're also creating pages.
+        header += '''\
+# Prepare the canvas.
+%scanvas.true_width = %.10g
+%scanvas.true_height = %.10g
+%scanvas.viewbox = %s
+''' % \
+                  (canvas_cmt, svg_width,
+                   canvas_cmt, svg_height,
+                   canvas_cmt, repr(svg_viewbox))
+        for pg in pages:
+            header += 'page(%s, (%.10g, %.10g), (%.10g, %.10g))\n' % \
+                (repr(pg.get('inkscape:label', '')),
+                 pg.x, pg.y, pg.width, pg.height)
+        header += '\n'
+        stream.write(header.encode('utf-8'))
+        self._write_metadata(stream)
+        self._write_license(stream)
+
     def save(self, stream):
         'Write Python code that regenerates the SVG to an output stream.'
-        stream.write(b'''\
-# This Python script is intended to be run from Inkscape's Simple
-# Inkscape Scripting extension.
+        # Write some header code.
+        self.write_header(stream)
 
-''')
+        # Convert shapes and other objects to Python.
+        stream.write('# Generate an image.\n'.encode('utf-8'))
         code = self.convert_all_shapes()
         self.find_dependencies(code)
         code = self.sort_statement_forest(code)
@@ -1014,5 +1319,9 @@ class SvgToPythonScript(inkex.OutputExtension):
             stream.write(ln.encode('utf-8'))
 
 
-if __name__ == '__main__':
+def main():
     SvgToPythonScript().run()
+
+
+if __name__ == '__main__':
+    main()

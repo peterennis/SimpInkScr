@@ -4,6 +4,7 @@
 # overlap in the deepest level of the tree.                        #
 ####################################################################
 
+
 def tree_from(cx, cy, rad, hsep, vsep, depth, max_depth):
     'Recursively draw a binary tree.'
     left, right = None, None
@@ -22,6 +23,6 @@ def tree_from(cx, cy, rad, hsep, vsep, depth, max_depth):
 
 
 style(stroke_width=2, fill='#f4e3d7')
-tree_from(cx=width/2, cy=20, rad=10,
-          hsep=width/4, vsep=50,
+tree_from(cx=canvas.width/2, cy=20, rad=10,
+          hsep=canvas.width/4, vsep=50,
           depth=0, max_depth=5)
